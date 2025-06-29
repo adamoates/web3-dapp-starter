@@ -177,7 +177,7 @@ export default function LandingPage() {
               </h2>
               <pre className="bg-gray-800 text-gray-100 text-sm p-6 rounded-lg overflow-auto">
                 {`# Clone the repo
-$ git clone https://github.com/adamoates/web3-dapp-starter.git
+$ git clone https://github.com/YOUR_USERNAME/YOUR_REPO
 
 # Start development stack
 $ docker-compose up --build
@@ -189,7 +189,7 @@ pgAdmin: http://localhost:8080
 RedisInsight: http://localhost:8001
 Mongo Express: http://localhost:8081
 Mailpit: http://localhost:8025
-MinIO: http://localhost:9001
+MinIO Test: http://localhost:9001
 `}
               </pre>
             </div>
