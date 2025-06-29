@@ -8,7 +8,6 @@ import {
   SiMongodb,
   SiRedis,
   SiEthereum,
-  SiMinutemailer,
   SiTestinglibrary
 } from "react-icons/si";
 import { MdEmail } from "react-icons/md";
