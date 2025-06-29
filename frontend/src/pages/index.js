@@ -9,7 +9,7 @@ import {
   SiRedis,
   SiEthereum
 } from "react-icons/si";
-import { MdEmail } from "react-icons/md"; // ✅ Use for mail icon
+import { MdEmail } from "react-icons/md";
 
 const techStack = [
   {
@@ -103,36 +103,32 @@ export default function LandingPage() {
 
       <main className="flex-grow">
         {activeTab === "tech" && (
-          <>
-            <section className="py-16 bg-white">
-              <div className="max-w-5xl mx-auto px-6 text-center">
-                <h2 className="text-3xl font-semibold text-gray-900 mb-6">
-                  ⚙️ Tech Stack
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                  {techStack.map((tech) => (
-                    <a
-                      key={tech.name}
-                      href={tech.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="bg-gray-100 p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow block text-left"
-                    >
-                      <div className="flex items-center space-x-2 mb-2">
-                        {tech.icon}
-                        <span className="font-medium text-gray-900">
-                          {tech.name} <span className="text-sm">↗</span>
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-600">
-                        {tech.description}
-                      </p>
-                    </a>
-                  ))}
-                </div>
+          <section className="py-16 bg-white">
+            <div className="max-w-5xl mx-auto px-6 text-center">
+              <h2 className="text-3xl font-semibold text-gray-900 mb-6">
+                ⚙️ Tech Stack
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {techStack.map((tech) => (
+                  <a
+                    key={tech.name}
+                    href={tech.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-gray-100 p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow block text-left"
+                  >
+                    <div className="flex items-center space-x-2 mb-2">
+                      {tech.icon}
+                      <span className="font-medium text-gray-900">
+                        {tech.name} <span className="text-sm">↗</span>
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600">{tech.description}</p>
+                  </a>
+                ))}
               </div>
-            </section>
-          </>
+            </div>
+          </section>
         )}
 
         {activeTab === "features" && (
@@ -178,7 +174,8 @@ Backend: http://localhost:5001
 pgAdmin: http://localhost:8080
 RedisInsight: http://localhost:8001
 Mongo Express: http://localhost:8081
-Mailpit: http://localhost:8025`}
+Mailpit: http://localhost:8025
+Hoppscotch: http://localhost:3002`}
               </pre>
             </div>
           </section>
