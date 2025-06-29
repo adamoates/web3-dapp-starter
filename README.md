@@ -1,70 +1,170 @@
-# Getting Started with Create React App
+# DApp Development Environment 🛠️
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A full-stack blockchain application boilerplate using:
 
-## Available Scripts
+* **Hardhat** for smart contracts
+* **PostgreSQL, MongoDB, Redis** for data and caching
+* **Node.js/Express** backend
+* **React** frontend
+* **Docker Compose** for orchestration
+* **Mailpit** for local email testing
 
-In the project directory, you can run:
+---
 
-### `npm start`
+## 🚀 Quick Start
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+### 1. Clone the Repository
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+```bash
+git clone https://github.com/your-org/dapp-monorepo.git
+cd dapp-monorepo
+```
 
-### `npm test`
+### 2. Set up environment variables
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Copy and modify the environment config:
 
-### `npm run build`
+```bash
+cp .env.example .env
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+### 3. Start All Services
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```bash
+docker compose up --build
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+* Frontend: [http://localhost:3000](http://localhost:3000)
+* Backend API: [http://localhost:5001/health](http://localhost:5001/health)
+* Mongo Express: [http://localhost:8081](http://localhost:8081)
+* RedisInsight: [http://localhost:8001](http://localhost:8001)
+* PGAdmin: [http://localhost:8080](http://localhost:8080)
+* Mailpit: [http://localhost:8025](http://localhost:8025)
 
-### `npm run eject`
+---
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## 📬 Email Testing
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+Test email via `/test-email`:
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+```bash
+curl http://localhost:5001/test-email
+```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+Mailpit shows received emails at [http://localhost:8025](http://localhost:8025)
 
-## Learn More
+---
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## 🔐 Ethereum Smart Contract Setup
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+### Configure API Keys
 
-### Code Splitting
+#### 1. Sepolia RPC URL
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+Sign up on [Infura](https://infura.io/) or [Alchemy](https://alchemy.com/) and create a project.
 
-### Analyzing the Bundle Size
+```env
+SEPOLIA_URL=https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+#### 2. MetaMask Private Key
 
-### Making a Progressive Web App
+Export your private key from MetaMask settings and add it to your `.env`:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+```env
+PRIVATE_KEY=your_metamask_account_private_key
+```
 
-### Advanced Configuration
+> **Never share your real `.env` or private keys.**
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+### Hardhat Network Config (`hardhat.config.js`)
 
-### Deployment
+```js
+require("@nomiclabs/hardhat-ethers");
+require("dotenv").config();
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+module.exports = {
+  solidity: "0.8.18",
+  networks: {
+    sepolia: {
+      url: process.env.SEPOLIA_URL,
+      accounts: [process.env.PRIVATE_KEY]
+    }
+  }
+};
+```
 
-### `npm run build` fails to minify
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+## 🧪 Testing MongoDB, Redis, and Postgres
+
+### Mongo
+
+```bash
+docker exec -it dapp-mongo-1 mongosh
+```
+
+### Redis
+
+```bash
+docker exec -it dapp-redis-1 redis-cli
+> set testkey "hello redis"
+> get testkey
+```
+
+### Postgres
+
+```bash
+docker exec -it dapp-postgres-1 psql -U devuser -d dev_dapp
+```
+
+---
+
+## 🔧 Debugging
+
+* Check logs:
+
+```bash
+docker compose logs backend
+```
+
+* Restart a service:
+
+```bash
+docker compose restart redis
+```
+
+* Shell into a container:
+
+```bash
+docker exec -it dapp-backend-1 sh
+```
+
+---
+
+## ✅ Coming Soon
+
+* Smart contract deployment scripts
+* Etherscan verification
+* Email queueing via BullMQ
+* CI pipelines for tests and builds
+
+---
+
+## 📁 Project Structure
+
+```
+.
+├── backend
+├── frontend
+├── contracts
+├── docker-compose.yml
+├── .env / .env.example
+└── README.md
+```
+
+---
+
+## 📄 License
+
+MIT © 2025

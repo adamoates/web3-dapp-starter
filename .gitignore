@@ -1,7 +1,6 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
 /.pnp
 .pnp.js
 
@@ -21,3 +20,48 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Root-level
+node_modules/
+.env
+.DS_Store
+
+# Smart contract project (e.g., smart-contracts/)
+smart-contracts/artifacts/
+smart-contracts/cache/
+smart-contracts/node_modules/
+smart-contracts/deployments/
+smart-contracts/.env
+smart-contracts/.DS_Store
+
+# Optional coverage and logs
+smart-contracts/coverage/
+smart-contracts/coverage.json
+smart-contracts/hardhat.log
+
+# Frontend React project (e.g., frontend/)
+frontend/node_modules/
+frontend/build/
+frontend/.env
+frontend/.DS_Store
+frontend/.next/
+frontend/.cache/
+frontend/.vite/
+frontend/dist/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# VSCode and system
+.vscode/
+*.swp
+.idea/
+
+# OS generated
+Thumbs.db
+ehthumbs.db
+Icon?
+Desktop.ini
