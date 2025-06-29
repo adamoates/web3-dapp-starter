@@ -182,7 +182,7 @@ export default function LandingPage() {
               </h2>
               <pre className="bg-gray-800 text-gray-100 text-sm p-6 rounded-lg overflow-auto">
                 {`# Clone the repo
-$ git clone https://github.com/YOUR_USERNAME/YOUR_REPO
+$ git clone https://github.com/adamoates/web3-dapp-starter.git
 
 # Start development stack
 $ docker-compose up --build
