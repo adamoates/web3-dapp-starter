@@ -51,8 +51,14 @@ const techStack = [
     description: "In-memory data structure store, used for queues/caching."
   },
   {
-    name: "MinIO (S3-compatible storage)",
-    icon: <SiDocker className="text-yellow-600 text-3xl" />,
+    name: "MinIO",
+    icon: (
+      <img
+        src="/assets/minio.svg"
+        alt="MinIO"
+        className="w-[4.5rem] h-[4.5rem] -mb-5 -mt-5"
+      />
+    ),
     link: "https://min.io/",
     description: "Self-hosted object storage with S3 compatibility."
   },
