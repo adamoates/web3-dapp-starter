@@ -77,7 +77,7 @@ app.get("/test-email", async (req, res) => {
   }
 });
 app.get("/minio-status", async (req, res) => {
-  const bucket = process.env.MINIO_BUCKET || "starter-bucket";
+  const bucket = process.env.MINIO_BUCKET || "dapp";
   try {
     await ensureBucket(bucket);
     const exists = await minioClient.bucketExists(bucket);

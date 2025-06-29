@@ -7,7 +7,9 @@ import {
   SiPostgresql,
   SiMongodb,
   SiRedis,
-  SiEthereum
+  SiEthereum,
+  SiMinutemailer,
+  SiTestinglibrary
 } from "react-icons/si";
 import { MdEmail } from "react-icons/md";
 
@@ -49,6 +51,12 @@ const techStack = [
     description: "In-memory data structure store, used for queues/caching."
   },
   {
+    name: "MinIO (S3-compatible storage)",
+    icon: <SiDocker className="text-yellow-600 text-3xl" />,
+    link: "https://min.io/",
+    description: "Self-hosted object storage with S3 compatibility."
+  },
+  {
     name: "Nodemailer + Mailpit",
     icon: <MdEmail className="text-yellow-600 text-3xl" />,
     link: "https://nodemailer.com/about/",
@@ -59,6 +67,12 @@ const techStack = [
     icon: <SiDocker className="text-blue-400 text-3xl" />,
     link: "https://docs.docker.com/compose/",
     description: "Multi-container orchestration for dev environments."
+  },
+  {
+    name: "Jest + Supertest",
+    icon: <SiTestinglibrary className="text-pink-500 text-3xl" />,
+    link: "https://jestjs.io/",
+    description: "Test backend routes and async logic with Supertest + Jest."
   }
 ];
 
@@ -175,7 +189,8 @@ pgAdmin: http://localhost:8080
 RedisInsight: http://localhost:8001
 Mongo Express: http://localhost:8081
 Mailpit: http://localhost:8025
-Hoppscotch: http://localhost:3002`}
+MinIO: http://localhost:9001
+`}
               </pre>
             </div>
           </section>

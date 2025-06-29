@@ -118,6 +118,14 @@ docker exec -it dapp-redis-1 redis-cli
 docker exec -it dapp-postgres-1 psql -U devuser -d dev_dapp
 ```
 
+### MinIO Integration
+
+```bash
+docker exec -it dapp-minio-1 sh
+mc alias set local http://localhost:9000 minio minio123
+mc ls local
+```
+
 ---
 
 ## 🔧 Debugging
