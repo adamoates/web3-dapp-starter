@@ -1,20 +1,28 @@
 // utils/minio.js
 const { Client } = require("minio");
 
-const client = new Client({
-  endPoint: process.env.MINIO_ENDPOINT || "minio",
-  port: parseInt(process.env.MINIO_PORT || "9000", 10),
-  useSSL: false,
-  accessKey: process.env.MINIO_ROOT_USER,
-  secretKey: process.env.MINIO_ROOT_PASSWORD
-});
+let client = null;
 
-async function ensureBucket(bucket = MINIO_BUCKET) {
-  const exists = await client.bucketExists(bucket);
+function getClient() {
+  if (!client) {
+    client = new Client({
+      endPoint: process.env.MINIO_ENDPOINT || "minio",
+      port: parseInt(process.env.MINIO_PORT || "9000", 10),
+      useSSL: false,
+      accessKey: process.env.MINIO_ROOT_USER,
+      secretKey: process.env.MINIO_ROOT_PASSWORD
+    });
+  }
+  return client;
+}
+
+async function ensureBucket(bucket = process.env.MINIO_BUCKET) {
+  const minioClient = getClient();
+  const exists = await minioClient.bucketExists(bucket);
   if (!exists) {
-    await client.makeBucket(bucket);
+    await minioClient.makeBucket(bucket);
     console.log(`✅ Created MinIO bucket: ${bucket}`);
   }
 }
 
-module.exports = { client, ensureBucket };
+module.exports = { getClient, ensureBucket };

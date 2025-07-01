@@ -1,0 +1,142 @@
+version: "3.8"
+
+services:
+  # PostgreSQL for testing - optimized for speed
+  postgres-test:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5433:5432" # Different port to avoid conflicts with dev
+    tmpfs:
+      - /var/lib/postgresql/data:rw,noexec,nosuid,size=1048576k # Use 1GB tmpfs for speed and space
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=100
+      -c shared_buffers=128MB
+      -c effective_cache_size=512MB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  # MongoDB for testing - optimized for speed
+  mongo-test:
+    image: mongo:6
+    ports:
+      - "27018:27017" # Different port to avoid conflicts
+    tmpfs:
+      - /var/lib/postgresql/data:rw,noexec,nosuid,size=524288k # Use tmpfs for speed
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: >
+      mongod
+      --wiredTigerCacheSizeGB 1
+      --setParameter enableLocalhostAuthBypass=false
+      --setParameter diagnosticDataCollectionEnabled=false
+
+  # Redis for testing - optimized for speed
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379" # Different port to avoid conflicts
+    tmpfs:
+      - /data:rw,noexec,nosuid,size=65536k # Use tmpfs for speed
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 64mb
+      --maxmemory-policy allkeys-lru
+
+  # MinIO for testing - optimized for speed
+  minio-test:
+    image: minio/minio:latest
+    ports:
+      - "9002:9000" # API port
+      - "9003:9001" # Console port
+    environment:
+      MINIO_ROOT_USER: test_user
+      MINIO_ROOT_PASSWORD: test_password
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:9003
+    volumes:
+      - minio_test_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    command: server /data --console-address ":9001"
+
+  # MinIO client for bucket setup
+  minio-client-test:
+    image: minio/mc:latest
+    depends_on:
+      minio-test:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: test_user
+      MINIO_ROOT_PASSWORD: test_password
+    entrypoint: >
+      /bin/sh -c "
+        echo 'Setting up MinIO test environment...';
+        sleep 3;
+        mc alias set test-local http://minio-test:9000 test_user test_password;
+        mc mb -p test-local/test-bucket || true;
+        mc anonymous set download test-local/test-bucket;
+        mc policy set public test-local/test-bucket;
+        echo 'MinIO test environment ready';
+        exit 0;
+      "
+
+  # Mailpit for email testing
+  mailpit-test:
+    image: axllent/mailpit:latest
+    ports:
+      - "1026:1025" # SMTP port
+      - "8026:8025" # Web UI port
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8025/api/v1/messages"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  minio_test_data:
+    driver: local
