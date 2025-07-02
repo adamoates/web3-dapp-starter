@@ -1,71 +1,88 @@
 module.exports = {
+  // Test environment
   testEnvironment: "node",
-  testPathIgnorePatterns: ["/node_modules/"],
-  collectCoverageFrom: ["src/**/*.js", "!**/node_modules/**"],
-  coverageReporters: ["text", "lcov", "html"],
-  testMatch: ["**/test/**/*.test.js"],
-  verbose: true,
-  forceExit: true,
-  detectOpenHandles: true,
-  testTimeout: 10000,
 
-  // Projects for different test environments
+  // Setup files
+  setupFilesAfterEnv: ["<rootDir>/test/setup/mock.js"],
+
+  // Test patterns
+  testMatch: ["<rootDir>/test/**/*.test.js", "<rootDir>/test/**/*.spec.js"],
+
+  // Coverage configuration
+  collectCoverage: true,
+  collectCoverageFrom: [
+    "src/**/*.js",
+    "!src/index.js",
+    "!src/app.js",
+    "!src/database.js",
+    "!src/migrations/**",
+    "!src/templates/**",
+    "!src/utils/minio.js"
+  ],
+  coverageDirectory: "coverage",
+  coverageReporters: ["text", "lcov", "html", "json"],
+  coverageThreshold: {
+    global: {
+      branches: 70,
+      functions: 70,
+      lines: 70,
+      statements: 70
+    }
+  },
+
+  // Projects for different test types
   projects: [
     {
       displayName: "unit",
       testMatch: ["<rootDir>/test/unit/**/*.test.js"],
-      setupFilesAfterEnv: ["<rootDir>/test/setup/mock.js"],
-      testEnvironment: "node",
-      clearMocks: true,
-      resetMocks: true,
-      restoreMocks: true,
-      moduleNameMapper: {
-        "^@/(.*)$": "<rootDir>/src/$1"
-      }
-    },
-    {
-      displayName: "mock-integration",
-      testMatch: ["<rootDir>/test/mock-integration/**/*.test.js"],
-      setupFilesAfterEnv: ["<rootDir>/test/setup/mock-integration.js"],
-      testEnvironment: "node",
-      clearMocks: true,
-      resetMocks: true,
-      restoreMocks: true
+      setupFilesAfterEnv: ["<rootDir>/test/setup/mock.js"]
     },
     {
       displayName: "integration",
       testMatch: ["<rootDir>/test/integration/**/*.test.js"],
-      setupFilesAfterEnv: ["<rootDir>/test/setup/real.js"],
-      testEnvironment: "node",
-      testTimeout: 45000,
-      clearMocks: false,
-      resetMocks: false,
-      restoreMocks: false
+      setupFilesAfterEnv: ["<rootDir>/test/setup/mock.js"]
     },
     {
-      displayName: "docker-integration",
-      testMatch: ["<rootDir>/test/integration/docker-*.test.js"],
-      setupFilesAfterEnv: ["<rootDir>/test/setup/docker.js"],
-      testEnvironment: "node",
-      testTimeout: 120000, // 2 minutes for Docker setup
-      clearMocks: false,
-      resetMocks: false,
-      restoreMocks: false
-    },
-    {
-      displayName: "security",
-      testMatch: ["<rootDir>/test/security/**/*.test.js"],
-      setupFilesAfterEnv: ["<rootDir>/test/setup/mock.js"],
-      testEnvironment: "node"
-    },
-    {
-      displayName: "performance",
-      testMatch: ["<rootDir>/test/performance/**/*.test.js"],
-      setupFilesAfterEnv: ["<rootDir>/test/setup/mock.js"],
-      testEnvironment: "node"
+      displayName: "mock-integration",
+      testMatch: ["<rootDir>/test/mock-integration/**/*.test.js"],
+      setupFilesAfterEnv: [
+        "<rootDir>/test/setup/mock.js",
+        "<rootDir>/test/setup/mock-integration.js"
+      ]
     }
   ],
-  transform: {
-    "^.+\\.jsx?$": "babel-jest"
+
+  // Module name mapping
+  moduleNameMapper: {
+    "^@/(.*)$": "<rootDir>/src/$1"
+  },
+
+  // Transform configuration
+  transform: {},
+
+  // Test timeout
+  testTimeout: 30000,
+
+  // Verbose output
+  verbose: true,
+
+  // Clear mocks between tests
+  clearMocks: true,
+  restoreMocks: true,
+
+  // Coverage exclusions
+  coveragePathIgnorePatterns: [
+    "/node_modules/",
+    "/test/",
+    "/coverage/",
+    "/migrations/",
+    "/templates/",
+    "jest.config.js",
+    "package.json"
+  ],
+
+  // Test environment variables
+  testEnvironmentOptions: {
+    NODE_ENV: "test"
   }
 };

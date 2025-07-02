@@ -1,11 +1,24 @@
 const request = require("supertest");
-const { app, dbManager } = require("../../src/index");
+const { createApp, dbManager } = require("../../src/index");
 const MinIOService = require("../../src/services/MinIOService");
 
 describe("MinIO File Management Integration Tests", () => {
+  let app;
   let testUser;
   let authToken;
   let minioService;
+
+  beforeAll(async () => {
+    // Ensure databases are connected
+    await dbManager.connect();
+
+    // Create app instance
+    app = await createApp({ dbManager });
+
+    // Initialize MinIO service
+    minioService = new MinIOService();
+    await minioService.init();
+  });
 
   beforeAll(async () => {
     // Ensure databases are connected

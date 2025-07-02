@@ -30,8 +30,8 @@ const DOCKER_CONFIG = {
     endPoint: "localhost",
     port: 9002,
     useSSL: false,
-    accessKey: "test_user",
-    secretKey: "test_password"
+    accessKey: "minioadmin",
+    secretKey: "minioadmin"
   }
 };
 

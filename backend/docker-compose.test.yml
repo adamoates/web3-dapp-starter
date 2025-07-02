@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # PostgreSQL for testing - optimized for speed
   postgres-test:
@@ -42,7 +40,7 @@ services:
     ports:
       - "27018:27017" # Different port to avoid conflicts
     tmpfs:
-      - /var/lib/postgresql/data:rw,noexec,nosuid,size=524288k # Use tmpfs for speed
+      - /data/db:rw,noexec,nosuid,size=524288k # Use tmpfs for speed
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 5s
@@ -82,8 +80,8 @@ services:
       - "9002:9000" # API port
       - "9003:9001" # Console port
     environment:
-      MINIO_ROOT_USER: test_user
-      MINIO_ROOT_PASSWORD: test_password
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
       MINIO_BROWSER_REDIRECT_URL: http://localhost:9003
     volumes:
       - minio_test_data:/data
@@ -102,16 +100,20 @@ services:
       minio-test:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: test_user
-      MINIO_ROOT_PASSWORD: test_password
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
     entrypoint: >
       /bin/sh -c "
         echo 'Setting up MinIO test environment...';
         sleep 3;
-        mc alias set test-local http://minio-test:9000 test_user test_password;
-        mc mb -p test-local/test-bucket || true;
-        mc anonymous set download test-local/test-bucket;
-        mc policy set public test-local/test-bucket;
+        mc alias set test-local http://minio-test:9000 minioadmin minioadmin;
+        mc mb -p test-local/user-avatars || true;
+        mc mb -p test-local/user-documents || true;
+        mc mb -p test-local/nft-assets || true;
+        mc mb -p test-local/temp-uploads || true;
+        mc anonymous set download test-local/user-avatars;
+        mc policy set public test-local/user-avatars;
+        mc policy set public test-local/nft-assets;
         echo 'MinIO test environment ready';
         exit 0;
       "
@@ -136,6 +138,49 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # Backend service for testing with Allure support
+  backend-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    environment:
+      - NODE_ENV=test
+      - POSTGRES_HOST=postgres-test
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_password
+      - POSTGRES_DB=test_db
+      - MONGODB_URI=mongodb://mongo-test:27017/test_db
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - MINIO_ENDPOINT=minio-test
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_AVATARS_BUCKET=user-avatars
+      - MINIO_DOCUMENTS_BUCKET=user-documents
+      - MINIO_NFT_ASSETS_BUCKET=nft-assets
+      - MINIO_TEMP_BUCKET=temp-uploads
+      - SMTP_HOST=mailpit-test
+      - SMTP_PORT=1025
+      - JWT_SECRET=test-jwt-secret-key-for-testing-only
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      mongo-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      minio-test:
+        condition: service_healthy
+      mailpit-test:
+        condition: service_healthy
+    volumes:
+      - ./allure-results:/usr/src/app/allure-results
+      - ./allure-report:/usr/src/app/allure-report
+    ports:
+      - "5001:5000"
 
 volumes:
   minio_test_data:

@@ -39,54 +39,23 @@ const authenticateToken = (pool) => {
 const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
-  // Define allowed file types per endpoint
-  const allowedTypes = {
-    image: ["image/jpeg", "image/png", "image/gif", "image/webp"],
-    document: [
-      "application/pdf",
-      "text/plain",
-      "application/json",
-      "application/xml"
-    ],
-    avatar: ["image/jpeg", "image/png", "image/webp"],
-    nft: [
-      "image/jpeg",
-      "image/png",
-      "image/gif",
-      "image/webp",
-      "video/mp4",
-      "video/webm"
-    ],
-    general: [
-      "image/jpeg",
-      "image/png",
-      "image/gif",
-      "image/webp",
-      "application/pdf",
-      "text/plain",
-      "application/json"
-    ]
-  };
+  // Define allowed file types
+  const allowedTypes = [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+    "text/plain",
+    "application/json",
+    "application/xml"
+  ];
 
-  // Determine upload type based on route
-  let uploadType = "general";
-  if (req.route.path.includes("avatar")) {
-    uploadType = "avatar";
-  } else if (req.route.path.includes("document")) {
-    uploadType = "document";
-  } else if (req.route.path.includes("nft")) {
-    uploadType = "nft";
-  } else if (req.route.path.includes("image")) {
-    uploadType = "image";
-  }
-
-  if (allowedTypes[uploadType].includes(file.mimetype)) {
+  if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
     cb(
-      new Error(
-        `Invalid file type. Allowed: ${allowedTypes[uploadType].join(", ")}`
-      ),
+      new Error("Invalid file type. Only images and documents are allowed."),
       false
     );
   }
@@ -98,7 +67,7 @@ const upload = multer({
   fileFilter,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
-    files: 5 // Max 5 files at once
+    files: 1 // Max 1 file at once for single upload
   }
 });
 
@@ -198,26 +167,25 @@ const validateImageDimensions = (file, maxWidth = 1920, maxHeight = 1080) => {
       }
     };
     img.onerror = () => {
-      reject(new Error("Invalid image file"));
+      reject(new Error("Failed to load image for dimension validation"));
     };
     img.src = URL.createObjectURL(file);
   });
 };
 
-// Utility function to sanitize filename
+// Utility function to sanitize filenames
 const sanitizeFilename = (filename) => {
   return filename
     .replace(/[^a-zA-Z0-9.-]/g, "_")
     .replace(/_{2,}/g, "_")
-    .substring(0, 255);
+    .toLowerCase();
 };
 
 module.exports = {
+  upload,
   createUploadMiddleware,
   createMultipleUploadMiddleware,
   createFieldsUploadMiddleware,
-  upload,
-  authenticateToken,
   validateImageDimensions,
   sanitizeFilename
 };

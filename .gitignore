@@ -65,3 +65,19 @@ Thumbs.db
 ehthumbs.db
 Icon?
 Desktop.ini
+# Allure test reports
+allure-results/
+allure-report/
+
+# Backend specific (handled by backend/.gitignore)
+backend/coverage/
+backend/allure-results/
+backend/allure-report/
+backend/*.log
+backend/jest.temp.config.js
+
+# File size limits
+*.zip
+*.tar.gz
+*.rar
+*.7z

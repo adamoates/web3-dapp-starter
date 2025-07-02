@@ -2,25 +2,173 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const DatabaseManager = require("./db/DatabaseManager");
 const createAuthRouter = require("./routes/auth");
 const createWeb3Router = require("./routes/web3");
 const createFileRouter = require("./routes/files");
+const createEmailRouter = require("./routes/email");
+const createTenantRouter = require("./routes/tenants");
+const createQueueRouter = require("./routes/queues");
 const MinIOService = require("./services/MinIOService");
+const QueueService = require("./services/QueueService");
+const EmailWorker = require("./workers/EmailWorker");
+const BlockchainWorker = require("./workers/BlockchainWorker");
+const MaintenanceWorker = require("./workers/MaintenanceWorker");
 const { getClient, ensureBucket } = require("./utils/minio");
 const nodemailer = require("nodemailer");
+const {
+  initializeAuth,
+  authenticateToken,
+  createRateLimit
+} = require("./middleware/auth");
+const {
+  initializeTenant,
+  resolveTenant,
+  extractTenantFromToken,
+  optionalTenant
+} = require("./middleware/tenant");
+const {
+  initializeLogging,
+  logApiRequests,
+  logSecurityEvents,
+  performanceMonitor,
+  errorLogger
+} = require("./middleware/logging");
+const LoggingService = require("./services/LoggingService");
 
-function createApp({ dbManager, minioService } = {}) {
+async function createApp() {
   const app = express();
+  let dbManager = null;
+  let loggingService = null;
+  let queueService = null;
+
+  // Initialize database connections
+  async function initializeDatabases() {
+    try {
+      dbManager = new DatabaseManager();
+      await dbManager.connect();
+
+      // Initialize services that depend on databases
+      loggingService = new LoggingService(dbManager.databases);
+
+      // Initialize middleware with database connections
+      initializeAuth(dbManager.databases);
+      initializeLogging(dbManager.databases);
+      initializeTenant(dbManager.databases);
+
+      console.log("✅ Database connections and services initialized");
+      return true;
+    } catch (error) {
+      console.error("❌ Failed to initialize databases:", error);
+      return false;
+    }
+  }
 
   // Security middleware
-  app.use(helmet());
-  app.use(cors());
-  app.use(express.json({ limit: "10mb" }));
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          scriptSrc: ["'self'"],
+          imgSrc: ["'self'", "data:", "https:"],
+          connectSrc: [
+            "'self'",
+            "https://api.coingecko.com",
+            "https://mainnet.infura.io"
+          ]
+        }
+      }
+    })
+  );
 
-  // Use provided dbManager or default
-  dbManager = dbManager || new DatabaseManager();
-  minioService = minioService || new MinIOService();
+  // CORS configuration
+  app.use(
+    cors({
+      origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+
+        // Allow specific origins or all in development
+        const allowedOrigins = process.env.ALLOWED_ORIGINS
+          ? process.env.ALLOWED_ORIGINS.split(",")
+          : ["http://localhost:3000", "http://localhost:3001"];
+
+        if (
+          allowedOrigins.includes(origin) ||
+          process.env.NODE_ENV === "development"
+        ) {
+          callback(null, true);
+        } else {
+          callback(new Error("Not allowed by CORS"));
+        }
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Tenant-ID"]
+    })
+  );
+
+  // Body parsing middleware
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+  // Trust proxy for accurate IP addresses
+  app.set("trust proxy", 1);
+
+  // Global rate limiting
+  app.use(
+    createRateLimit({
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      max: 1000, // limit each IP to 1000 requests per windowMs
+      message: "Too many requests from this IP, please try again later",
+      standardHeaders: true,
+      legacyHeaders: false
+    })
+  );
+
+  // Logging and monitoring middleware
+  app.use(performanceMonitor);
+  app.use(logApiRequests);
+  app.use(logSecurityEvents);
+
+  // Tenant resolution middleware
+  if (process.env.NODE_ENV === "test") {
+    app.use(optionalTenant);
+  } else {
+    app.use(resolveTenant);
+  }
+
+  // Await all async initialization before registering routes
+  await initializeDatabases();
+
+  // Initialize queue service (only in production or when explicitly requested)
+  if (process.env.NODE_ENV !== "test") {
+    queueService = new QueueService();
+  }
+
+  // Initialize MinIO service
+  const minioService = new MinIOService();
+
+  // Initialize workers if queue service is available
+  let emailWorker, blockchainWorker, maintenanceWorker;
+  if (queueService) {
+    emailWorker = new EmailWorker(queueService);
+    blockchainWorker = new BlockchainWorker(queueService, dbManager.databases);
+    maintenanceWorker = new MaintenanceWorker(
+      queueService,
+      dbManager.databases
+    );
+
+    // Make workers available to routes
+    app.locals.emailWorker = emailWorker;
+    app.locals.blockchainWorker = blockchainWorker;
+    app.locals.maintenanceWorker = maintenanceWorker;
+
+    console.log("✅ Queue system initialized with workers");
+  }
 
   // Only initialize MinIO if not in test
   if (process.env.NODE_ENV !== "test") {
@@ -31,34 +179,158 @@ function createApp({ dbManager, minioService } = {}) {
   app.use("/api/auth", createAuthRouter(dbManager));
   app.use("/api/web3", createWeb3Router(dbManager));
   app.use("/api/files", createFileRouter(dbManager));
+  app.use("/api/email", createEmailRouter());
+  app.use("/api/tenants", createTenantRouter(dbManager));
+
+  // Queue management routes (only if queue service is available)
+  if (queueService && emailWorker && blockchainWorker && maintenanceWorker) {
+    app.use(
+      "/api/queues",
+      createQueueRouter(
+        queueService,
+        emailWorker,
+        blockchainWorker,
+        maintenanceWorker
+      )
+    );
+  }
+
+  console.log("✅ All routes and services initialized");
 
   // Health check endpoint
   app.get("/health", async (req, res) => {
     try {
-      const health = await dbManager.healthCheck();
-      const minioHealth = await minioService.healthCheck();
+      const health = {
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || "development",
+        tenantId: req.tenantId || null
+      };
 
-      const isHealthy =
-        health.postgres &&
-        health.mongodb &&
-        health.redis &&
-        minioHealth.status === "healthy";
+      // Check database connections
+      if (dbManager) {
+        health.databases = {
+          postgres: dbManager.databases.postgres ? "connected" : "disconnected",
+          redis: dbManager.databases.redis ? "connected" : "disconnected",
+          mongo: dbManager.databases.mongo ? "connected" : "disconnected"
+        };
+      }
 
-      res.status(isHealthy ? 200 : 503).json({
-        status: isHealthy ? "healthy" : "unhealthy",
-        databases: health,
-        storage: minioHealth,
-        timestamp: new Date().toISOString()
-      });
+      res.json(health);
     } catch (error) {
-      console.error("Health check error:", error);
-      res.status(503).json({
+      res.status(500).json({
         status: "unhealthy",
         error: error.message,
         timestamp: new Date().toISOString()
       });
     }
   });
+
+  // Logging routes (admin only)
+  app.get("/api/logs", authenticateToken, async (req, res) => {
+    try {
+      if (!loggingService) {
+        return res.status(503).json({ error: "Logging service not available" });
+      }
+
+      const {
+        tenantId = req.tenantId,
+        userId,
+        action,
+        level,
+        startDate,
+        endDate,
+        limit = 100,
+        offset = 0
+      } = req.query;
+
+      const logs = await loggingService.getLogs({
+        tenantId,
+        userId,
+        action,
+        level,
+        startDate,
+        endDate,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      });
+
+      res.json({ logs });
+    } catch (error) {
+      console.error("Get logs failed:", error);
+      res.status(500).json({ error: "Failed to get logs" });
+    }
+  });
+
+  // Audit trail endpoint
+  app.get("/api/audit/:userId", authenticateToken, async (req, res) => {
+    try {
+      if (!loggingService) {
+        return res.status(503).json({ error: "Logging service not available" });
+      }
+
+      const { userId } = req.params;
+      const { days = 30 } = req.query;
+
+      const auditTrail = await loggingService.getAuditTrail(
+        parseInt(userId),
+        req.tenantId,
+        parseInt(days)
+      );
+
+      res.json({ auditTrail });
+    } catch (error) {
+      console.error("Get audit trail failed:", error);
+      res.status(500).json({ error: "Failed to get audit trail" });
+    }
+  });
+
+  // Security audit endpoint
+  app.get("/api/security-audit", authenticateToken, async (req, res) => {
+    try {
+      if (!loggingService) {
+        return res.status(503).json({ error: "Logging service not available" });
+      }
+
+      const { days = 30 } = req.query;
+      const securityAudit = await loggingService.getSecurityAudit(
+        req.tenantId,
+        parseInt(days)
+      );
+
+      res.json({ securityAudit });
+    } catch (error) {
+      console.error("Get security audit failed:", error);
+      res.status(500).json({ error: "Failed to get security audit" });
+    }
+  });
+
+  // Graceful shutdown handler
+  const gracefulShutdown = async (signal) => {
+    console.log(`🛑 Received ${signal}, shutting down gracefully...`);
+
+    try {
+      // Close queue service if available
+      if (queueService) {
+        await queueService.shutdown();
+        console.log("✅ Queue service shut down");
+      }
+
+      // Close database connections
+      await dbManager.disconnect();
+      console.log("✅ Database connections closed");
+
+      process.exit(0);
+    } catch (error) {
+      console.error("❌ Error during shutdown:", error);
+      process.exit(1);
+    }
+  };
+
+  // Register shutdown handlers
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
   // Legacy endpoints for backward compatibility
   app.get("/ping", (req, res) => res.send("pong"));
@@ -103,34 +375,6 @@ function createApp({ dbManager, minioService } = {}) {
       }
     } catch (error) {
       res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Email test endpoint
-  app.get("/test-email", async (req, res) => {
-    try {
-      const transporter = nodemailer.createTransporter({
-        host: process.env.MAIL_HOST || "mailpit",
-        port: parseInt(process.env.MAIL_PORT || "1025", 10),
-        secure: false,
-        auth: process.env.MAIL_USERNAME
-          ? { user: process.env.MAIL_USERNAME, pass: process.env.MAIL_PASSWORD }
-          : undefined
-      });
-
-      const info = await transporter.sendMail({
-        from: `"Dapp Mail" <${process.env.MAIL_FROM}>`,
-        to: process.env.TEST_EMAIL_TO,
-        subject: "Test Email from Dapp Backend ✔",
-        text: "🚀 This is a test email sent from your Web3 backend."
-      });
-      res.json({ message: "✅ Email sent", info });
-    } catch (error) {
-      console.error("❌ Email send error:", error);
-      res.status(500).json({
-        error: "Failed to send email",
-        detail: error.message
-      });
     }
   });
 
@@ -188,21 +432,14 @@ function createApp({ dbManager, minioService } = {}) {
   });
 
   // Error handling middleware
-  app.use((error, req, res, next) => {
-    console.error("Unhandled error:", error);
-    res.status(500).json({
-      error: "Internal server error",
-      message:
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : "Something went wrong"
-    });
-  });
+  app.use(errorLogger);
 
   // 404 handler
   app.use((req, res) => {
     res.status(404).json({
-      error: "Not found"
+      error: "Not found",
+      path: req.path,
+      method: req.method
     });
   });
 
@@ -214,9 +451,11 @@ module.exports = createApp;
 
 // For direct run (e.g. node src/app.js), start server
 if (require.main === module) {
-  const app = createApp();
-  const PORT = process.env.PORT || 3001;
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-  });
+  (async () => {
+    const app = await createApp();
+    const PORT = process.env.PORT || 3001;
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  })();
 }

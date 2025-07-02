@@ -16,11 +16,11 @@ class MinIOService {
   getClient() {
     if (!this.client) {
       this.client = new Minio.Client({
-        endPoint: process.env.MINIO_ENDPOINT || "minio",
+        endPoint: process.env.MINIO_ENDPOINT || "localhost",
         port: parseInt(process.env.MINIO_PORT) || 9000,
         useSSL: process.env.MINIO_USE_SSL === "true",
-        accessKey: process.env.MINIO_ROOT_USER || "minio",
-        secretKey: process.env.MINIO_ROOT_PASSWORD || "minio123"
+        accessKey: process.env.MINIO_ACCESS_KEY || "minioadmin",
+        secretKey: process.env.MINIO_SECRET_KEY || "minioadmin"
       });
     }
     return this.client;

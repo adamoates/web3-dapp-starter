@@ -62,30 +62,17 @@ class Transaction {
   }
 
   async getPendingTransactions() {
-    const result = await this.pool.query(`
-      SELECT * FROM transactions 
-      WHERE status = 'pending' 
-      ORDER BY created_at ASC
-    `);
-
+    const result = await this.pool.query(
+      "SELECT * FROM transactions WHERE status = 'pending' ORDER BY created_at ASC"
+    );
     return result.rows;
   }
 
   async getTransactionStats(userId) {
     const result = await this.pool.query(
-      `
-      SELECT 
-        COUNT(*) as total_transactions,
-        COUNT(CASE WHEN status = 'confirmed' THEN 1 END) as confirmed_transactions,
-        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_transactions,
-        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_transactions,
-        SUM(CASE WHEN status = 'confirmed' THEN amount ELSE 0 END) as total_amount
-      FROM transactions 
-      WHERE user_id = $1
-    `,
+      "SELECT COUNT(*) as total_transactions, COUNT(CASE WHEN status = 'confirmed' THEN 1 END) as confirmed_transactions, COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_transactions, COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_transactions, SUM(CASE WHEN status = 'confirmed' THEN amount ELSE 0 END) as total_amount FROM transactions WHERE user_id = $1",
       [userId]
     );
-
     return result.rows[0];
   }
 

@@ -8,6 +8,7 @@ const {
 } = require("../../setup/helpers");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { ethers } = require("ethers");
 
 // Mock dependencies
 jest.mock("../../../src/models/sql/User");
@@ -15,6 +16,7 @@ jest.mock("../../../src/models/nosql/UserActivity");
 jest.mock("../../../src/models/sql/Transaction");
 jest.mock("bcryptjs");
 jest.mock("jsonwebtoken");
+jest.mock("../../../src/db/DatabaseManager");
 
 describe("UserService (Unit Tests)", () => {
   let userService;
@@ -35,8 +37,8 @@ describe("UserService (Unit Tests)", () => {
     };
 
     mockDatabases = {
-      postgresPool: {},
-      redisClient: mockRedisClient
+      postgres: {},
+      redis: mockRedisClient
     };
 
     // Create mock instances
@@ -368,6 +370,535 @@ describe("UserService (Unit Tests)", () => {
       expect(mockUserActivity.save).toHaveBeenCalled();
       expect(mockRedisClient.setex).toHaveBeenCalledTimes(2); // session and profile
       expect(result).toEqual(mockUpdatedUser);
+    });
+  });
+});
+
+describe("UserService - Wallet Authentication", () => {
+  let userService;
+  let mockUser;
+  let testWallet;
+
+  beforeEach(() => {
+    userService = new UserService();
+    testWallet = ethers.Wallet.createRandom();
+
+    // Reset all mocks
+    jest.clearAllMocks();
+
+    // Mock User model methods
+    mockUser = {
+      id: 1,
+      email: "test@example.com",
+      name: "Test User",
+      walletAddress: testWallet.address,
+      tenantId: 1,
+      save: jest.fn().mockResolvedValue(true),
+      update: jest.fn().mockResolvedValue(true)
+    };
+  });
+
+  describe("generateWalletChallenge", () => {
+    it("should generate a valid challenge for wallet authentication", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+
+      const result = await userService.generateWalletChallenge(
+        walletAddress,
+        tenantId
+      );
+
+      expect(result).toHaveProperty("message");
+      expect(result).toHaveProperty("nonce");
+      expect(result).toHaveProperty("expiresAt");
+      expect(result).toHaveProperty("walletAddress", walletAddress);
+      expect(result).toHaveProperty("tenantId", tenantId);
+
+      // Verify message format
+      expect(result.message).toContain("Sign this message to authenticate");
+      expect(result.message).toContain(`Wallet: ${walletAddress}`);
+      expect(result.message).toContain(`Nonce: ${result.nonce}`);
+      expect(result.message).toContain(`Tenant: ${tenantId}`);
+
+      // Verify nonce is a valid UUID
+      expect(result.nonce).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      );
+
+      // Verify expiration time (should be 5 minutes from now)
+      const expiresAt = new Date(result.expiresAt);
+      const now = new Date();
+      const timeDiff = expiresAt.getTime() - now.getTime();
+      expect(timeDiff).toBeGreaterThan(4 * 60 * 1000); // At least 4 minutes
+      expect(timeDiff).toBeLessThan(6 * 60 * 1000); // Less than 6 minutes
+    });
+
+    it("should store challenge in Redis", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+
+      await userService.generateWalletChallenge(walletAddress, tenantId);
+
+      // Verify Redis set was called
+      expect(userService.redis.set).toHaveBeenCalledWith(
+        `wallet_challenge:${walletAddress}`,
+        expect.any(String),
+        "EX",
+        300
+      );
+    });
+
+    it("should handle Redis errors gracefully", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+
+      // Mock Redis error
+      userService.redis.set.mockRejectedValue(new Error("Redis error"));
+
+      await expect(
+        userService.generateWalletChallenge(walletAddress, tenantId)
+      ).rejects.toThrow("Failed to generate wallet challenge");
+    });
+  });
+
+  describe("verifyWalletSignature", () => {
+    it("should verify valid signature and return user", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+      const message =
+        "Sign this message to authenticate\nWallet: " +
+        walletAddress +
+        "\nNonce: test-nonce\nTenant: " +
+        tenantId;
+      const signature = await testWallet.signMessage(message);
+
+      // Mock challenge retrieval
+      const challenge = {
+        message,
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        walletAddress,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      // Mock user retrieval
+      User.findOne.mockResolvedValue(mockUser);
+
+      // Mock JWT generation
+      jwt.sign.mockReturnValue("mock-jwt-token");
+
+      // Mock session creation
+      userService.redis.set.mockResolvedValue("OK");
+
+      const result = await userService.verifyWalletSignature(
+        walletAddress,
+        signature,
+        tenantId
+      );
+
+      expect(result).toHaveProperty("user");
+      expect(result).toHaveProperty("token");
+      expect(result).toHaveProperty("sessionId");
+      expect(result.user).toEqual(mockUser);
+      expect(result.token).toBe("mock-jwt-token");
+    });
+
+    it("should create new user if wallet not found", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+      const message =
+        "Sign this message to authenticate\nWallet: " +
+        walletAddress +
+        "\nNonce: test-nonce\nTenant: " +
+        tenantId;
+      const signature = await testWallet.signMessage(message);
+
+      // Mock challenge retrieval
+      const challenge = {
+        message,
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        walletAddress,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      // Mock user not found
+      User.findOne.mockResolvedValue(null);
+
+      // Mock user creation
+      User.create.mockResolvedValue(mockUser);
+
+      // Mock JWT generation
+      jwt.sign.mockReturnValue("mock-jwt-token");
+
+      // Mock session creation
+      userService.redis.set.mockResolvedValue("OK");
+
+      const result = await userService.verifyWalletSignature(
+        walletAddress,
+        signature,
+        tenantId
+      );
+
+      expect(User.create).toHaveBeenCalledWith({
+        walletAddress,
+        name: expect.stringContaining("Wallet User"),
+        tenantId,
+        isWalletOnly: true
+      });
+      expect(result).toHaveProperty("user", mockUser);
+    });
+
+    it("should reject invalid signature", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+      const message =
+        "Sign this message to authenticate\nWallet: " +
+        walletAddress +
+        "\nNonce: test-nonce\nTenant: " +
+        tenantId;
+      const invalidSignature = "0x" + "1".repeat(130);
+
+      // Mock challenge retrieval
+      const challenge = {
+        message,
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        walletAddress,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      await expect(
+        userService.verifyWalletSignature(
+          walletAddress,
+          invalidSignature,
+          tenantId
+        )
+      ).rejects.toThrow("Invalid signature");
+    });
+
+    it("should reject signature from different wallet", async () => {
+      const walletAddress = testWallet.address;
+      const differentWallet = ethers.Wallet.createRandom();
+      const tenantId = 1;
+      const message =
+        "Sign this message to authenticate\nWallet: " +
+        walletAddress +
+        "\nNonce: test-nonce\nTenant: " +
+        tenantId;
+      const signature = await differentWallet.signMessage(message);
+
+      // Mock challenge retrieval
+      const challenge = {
+        message,
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        walletAddress,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      await expect(
+        userService.verifyWalletSignature(walletAddress, signature, tenantId)
+      ).rejects.toThrow("Invalid signature");
+    });
+
+    it("should reject expired challenge", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+      const message =
+        "Sign this message to authenticate\nWallet: " +
+        walletAddress +
+        "\nNonce: test-nonce\nTenant: " +
+        tenantId;
+      const signature = await testWallet.signMessage(message);
+
+      // Mock expired challenge
+      const challenge = {
+        message,
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() - 60000).toISOString(), // Expired
+        walletAddress,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      await expect(
+        userService.verifyWalletSignature(walletAddress, signature, tenantId)
+      ).rejects.toThrow("Challenge expired");
+    });
+
+    it("should reject missing challenge", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+      const signature = "0x" + "1".repeat(130);
+
+      // Mock no challenge found
+      userService.redis.get.mockResolvedValue(null);
+
+      await expect(
+        userService.verifyWalletSignature(walletAddress, signature, tenantId)
+      ).rejects.toThrow("Invalid or expired challenge");
+    });
+
+    it("should reject challenge for different wallet", async () => {
+      const walletAddress = testWallet.address;
+      const differentWallet = ethers.Wallet.createRandom();
+      const tenantId = 1;
+      const message =
+        "Sign this message to authenticate\nWallet: " +
+        differentWallet.address +
+        "\nNonce: test-nonce\nTenant: " +
+        tenantId;
+      const signature = await testWallet.signMessage(message);
+
+      // Mock challenge for different wallet
+      const challenge = {
+        message,
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        walletAddress: differentWallet.address,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      await expect(
+        userService.verifyWalletSignature(walletAddress, signature, tenantId)
+      ).rejects.toThrow("Invalid or expired challenge");
+    });
+  });
+
+  describe("linkWalletToUser", () => {
+    it("should link wallet to existing user", async () => {
+      const userId = 1;
+      const walletAddress = testWallet.address;
+      const message = `Link wallet ${walletAddress} to your account.\n\nUser ID: ${userId}\nTimestamp: ${Date.now()}`;
+      const signature = await testWallet.signMessage(message);
+
+      // Mock user retrieval
+      User.findByPk.mockResolvedValue(mockUser);
+
+      // Mock user update
+      mockUser.update.mockResolvedValue(mockUser);
+
+      const result = await userService.linkWalletToUser(
+        userId,
+        walletAddress,
+        signature
+      );
+
+      expect(mockUser.update).toHaveBeenCalledWith({
+        walletAddress,
+        isWalletOnly: false
+      });
+      expect(result).toEqual(mockUser);
+    });
+
+    it("should reject if user not found", async () => {
+      const userId = 999;
+      const walletAddress = testWallet.address;
+      const message = `Link wallet ${walletAddress} to your account.\n\nUser ID: ${userId}\nTimestamp: ${Date.now()}`;
+      const signature = await testWallet.signMessage(message);
+
+      // Mock user not found
+      User.findByPk.mockResolvedValue(null);
+
+      await expect(
+        userService.linkWalletToUser(userId, walletAddress, signature)
+      ).rejects.toThrow("User not found");
+    });
+
+    it("should reject invalid signature", async () => {
+      const userId = 1;
+      const walletAddress = testWallet.address;
+      const invalidSignature = "0x" + "1".repeat(130);
+
+      // Mock user retrieval
+      User.findByPk.mockResolvedValue(mockUser);
+
+      await expect(
+        userService.linkWalletToUser(userId, walletAddress, invalidSignature)
+      ).rejects.toThrow("Invalid signature");
+    });
+
+    it("should reject signature from different wallet", async () => {
+      const userId = 1;
+      const walletAddress = testWallet.address;
+      const differentWallet = ethers.Wallet.createRandom();
+      const message = `Link wallet ${walletAddress} to your account.\n\nUser ID: ${userId}\nTimestamp: ${Date.now()}`;
+      const signature = await differentWallet.signMessage(message);
+
+      // Mock user retrieval
+      User.findByPk.mockResolvedValue(mockUser);
+
+      await expect(
+        userService.linkWalletToUser(userId, walletAddress, signature)
+      ).rejects.toThrow("Invalid signature");
+    });
+  });
+
+  describe("walletAuthentication", () => {
+    it("should handle complete wallet authentication flow", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+      const message =
+        "Sign this message to authenticate\nWallet: " +
+        walletAddress +
+        "\nNonce: test-nonce\nTenant: " +
+        tenantId;
+      const signature = await testWallet.signMessage(message);
+
+      // Mock challenge retrieval
+      const challenge = {
+        message,
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        walletAddress,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      // Mock user retrieval
+      User.findOne.mockResolvedValue(mockUser);
+
+      // Mock JWT generation
+      jwt.sign.mockReturnValue("mock-jwt-token");
+
+      // Mock session creation
+      userService.redis.set.mockResolvedValue("OK");
+
+      const result = await userService.walletAuthentication(
+        walletAddress,
+        signature,
+        tenantId
+      );
+
+      expect(result).toHaveProperty("user", mockUser);
+      expect(result).toHaveProperty("token", "mock-jwt-token");
+      expect(result).toHaveProperty("sessionId");
+    });
+
+    it("should handle signature verification errors", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+      const invalidSignature = "0x" + "1".repeat(130);
+
+      // Mock challenge retrieval
+      const challenge = {
+        message: "test message",
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        walletAddress,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      await expect(
+        userService.walletAuthentication(
+          walletAddress,
+          invalidSignature,
+          tenantId
+        )
+      ).rejects.toThrow("Invalid signature");
+    });
+  });
+
+  describe("Session management with wallet auth", () => {
+    it("should create session for wallet authentication", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+      const message =
+        "Sign this message to authenticate\nWallet: " +
+        walletAddress +
+        "\nNonce: test-nonce\nTenant: " +
+        tenantId;
+      const signature = await testWallet.signMessage(message);
+
+      // Mock challenge retrieval
+      const challenge = {
+        message,
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        walletAddress,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      // Mock user retrieval
+      User.findOne.mockResolvedValue(mockUser);
+
+      // Mock JWT generation
+      jwt.sign.mockReturnValue("mock-jwt-token");
+
+      // Mock session creation
+      userService.redis.set.mockResolvedValue("OK");
+
+      const result = await userService.verifyWalletSignature(
+        walletAddress,
+        signature,
+        tenantId
+      );
+
+      // Verify session was created
+      expect(userService.redis.set).toHaveBeenCalledWith(
+        expect.stringMatching(/^session:/),
+        expect.any(String),
+        "EX",
+        3600
+      );
+
+      expect(result).toHaveProperty("sessionId");
+      expect(typeof result.sessionId).toBe("string");
+    });
+
+    it("should include tenant context in JWT token", async () => {
+      const walletAddress = testWallet.address;
+      const tenantId = 1;
+      const message =
+        "Sign this message to authenticate\nWallet: " +
+        walletAddress +
+        "\nNonce: test-nonce\nTenant: " +
+        tenantId;
+      const signature = await testWallet.signMessage(message);
+
+      // Mock challenge retrieval
+      const challenge = {
+        message,
+        nonce: "test-nonce",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        walletAddress,
+        tenantId
+      };
+      userService.redis.get.mockResolvedValue(JSON.stringify(challenge));
+
+      // Mock user retrieval
+      User.findOne.mockResolvedValue(mockUser);
+
+      // Mock JWT generation
+      jwt.sign.mockReturnValue("mock-jwt-token");
+
+      // Mock session creation
+      userService.redis.set.mockResolvedValue("OK");
+
+      await userService.verifyWalletSignature(
+        walletAddress,
+        signature,
+        tenantId
+      );
+
+      // Verify JWT was called with tenant context
+      expect(jwt.sign).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: mockUser.id,
+          tenantId: tenantId,
+          walletAddress: walletAddress
+        }),
+        expect.any(String),
+        expect.any(Object)
+      );
     });
   });
 });

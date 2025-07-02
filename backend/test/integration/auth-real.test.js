@@ -1,6 +1,5 @@
 const request = require("supertest");
-const express = require("express");
-const authRoutes = require("../../src/routes/auth");
+const createApp = require("../../src/app");
 const {
   setupRealDatabases,
   cleanupRealDatabases,
@@ -30,11 +29,7 @@ describe("Auth Routes (Real Integration Tests)", () => {
     dbManager = setup.dbManager;
 
     // Create Express app with real database connections
-    app = express();
-    app.use(express.json());
-
-    // Mount auth routes with real database manager
-    app.use("/api/auth", authRoutes);
+    app = createApp({ dbManager });
   });
 
   afterAll(async () => {

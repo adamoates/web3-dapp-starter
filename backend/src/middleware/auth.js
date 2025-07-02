@@ -1,7 +1,8 @@
 const UserService = require("../services/UserService");
+const { rateLimit } = require("express-rate-limit");
 
 // Initialize UserService (will be injected with databases)
-let userService;
+let userService = null;
 
 // Initialize the middleware with database connections
 function initializeAuth(databases) {
@@ -9,7 +10,7 @@ function initializeAuth(databases) {
 }
 
 /**
- * Authenticate JWT token from Authorization header
+ * Authenticate JWT token from Authorization header with tenant context
  */
 async function authenticateToken(req, res, next) {
   try {
@@ -25,17 +26,62 @@ async function authenticateToken(req, res, next) {
       return res.status(401).json({ error: "Invalid authorization format" });
     }
 
-    const user = await userService.verifyToken(token);
+    // Extract tenant context from request (could be from subdomain, header, or query param)
+    const tenantId =
+      req.tenantId || req.headers["x-tenant-id"] || req.query.tenantId;
+
+    const user = await userService.verifyToken(token, tenantId);
 
     if (!user) {
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
+    // Add tenant context to request
     req.user = user;
+    req.tenantId = user.tenantId;
+    req.sessionId = user.sessionId;
+
     next();
   } catch (error) {
-    console.error("Authentication error:", error);
+    // console.error("Authentication error:", error);
     return res.status(500).json({ error: "Authentication service error" });
+  }
+}
+
+/**
+ * Validate session is still active
+ */
+async function validateSession(req, res, next) {
+  try {
+    if (!req.user || !req.sessionId || !req.tenantId) {
+      return res.status(401).json({ error: "Invalid session" });
+    }
+
+    // Check if session is still active in Redis
+    const sessionKey = `tenant:${req.tenantId}:user_session:${req.user.userId}`;
+    const sessionData = await userService.databases.redis.get(sessionKey);
+
+    if (!sessionData) {
+      return res.status(401).json({ error: "Session expired" });
+    }
+
+    const session = JSON.parse(sessionData);
+    if (session.sessionId !== req.sessionId) {
+      return res.status(401).json({ error: "Session mismatch" });
+    }
+
+    // Update last activity
+    session.lastActivity = new Date().toISOString();
+    await userService.databases.redis.setex(
+      sessionKey,
+      3600,
+      JSON.stringify(session)
+    );
+
+    next();
+  } catch (error) {
+    console.error("Session validation error:", error);
+    return res.status(500).json({ error: "Session validation failed" });
   }
 }
 
@@ -75,51 +121,59 @@ function requireRole(role) {
 }
 
 /**
- * Rate limiting middleware
+ * Require specific tenant access
  */
-function rateLimit(options = {}) {
-  const {
-    windowMs = 15 * 60 * 1000, // 15 minutes
-    max = 5 // limit each IP to 5 requests per windowMs
-  } = options;
-
+function requireTenant(tenantId) {
   return (req, res, next) => {
-    // Simple in-memory rate limiting (in production, use Redis)
-    const ip = req.ip || req.connection.remoteAddress;
-    const now = Date.now();
-
-    if (!req.app.locals.rateLimit) {
-      req.app.locals.rateLimit = new Map();
+    if (!req.tenantId || req.tenantId !== tenantId) {
+      return res.status(403).json({ error: "Tenant access denied" });
     }
-
-    const rateLimitMap = req.app.locals.rateLimit;
-
-    if (!rateLimitMap.has(ip)) {
-      rateLimitMap.set(ip, { count: 0, resetTime: now + windowMs });
-    }
-
-    const rateLimit = rateLimitMap.get(ip);
-
-    if (now > rateLimit.resetTime) {
-      rateLimit.count = 0;
-      rateLimit.resetTime = now + windowMs;
-    }
-
-    if (rateLimit.count >= max) {
-      console.log(
-        `[RateLimit] IP ${ip} is rate limited (count: ${rateLimit.count}, max: ${max})`
-      );
-      return res.status(429).json({
-        error: "Too many requests, please try again later"
-      });
-    }
-
-    rateLimit.count++;
-    console.log(
-      `[RateLimit] IP ${ip} request count: ${rateLimit.count}/${max}`
-    );
     next();
   };
+}
+
+/**
+ * Require admin role within tenant
+ */
+function requireAdmin(req, res, next) {
+  if (!req.user || !req.user.isAdmin) {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
+}
+
+/**
+ * Rate limiting middleware with tenant isolation
+ */
+function createRateLimit(options = {}) {
+  const {
+    windowMs = 15 * 60 * 1000, // 15 minutes
+    max = 100, // limit each IP to 100 requests per windowMs
+    message = "Too many requests from this IP",
+    keyGenerator = null
+  } = options;
+
+  return rateLimit({
+    windowMs,
+    max,
+    message,
+    keyGenerator:
+      keyGenerator ||
+      ((req) => {
+        // Include tenant context in rate limiting key
+        const tenantId =
+          req.tenantId || req.headers["x-tenant-id"] || "default";
+        return `${tenantId}:${req.ip}`;
+      }),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+      res.status(429).json({
+        error: message,
+        retryAfter: Math.ceil(windowMs / 1000)
+      });
+    }
+  });
 }
 
 /**
@@ -147,12 +201,43 @@ function validateWalletOwnership() {
   };
 }
 
+/**
+ * Log authentication events
+ */
+async function logAuthEvent(req, eventType, details = {}) {
+  try {
+    if (!userService) return;
+
+    const activity = new (require("../models/nosql/UserActivity"))({
+      userId: req.user?.userId,
+      tenantId: req.tenantId,
+      action: eventType,
+      details: {
+        ...details,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        sessionId: req.sessionId
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+      sessionId: req.sessionId
+    });
+    await activity.save();
+  } catch (error) {
+    console.error("Failed to log auth event:", error);
+  }
+}
+
 module.exports = {
   initializeAuth,
   authenticateToken,
+  validateSession,
+  requireTenant,
+  requireAdmin,
+  createRateLimit,
+  logAuthEvent,
   requireAuth,
   optionalAuth,
   requireRole,
-  rateLimit,
   validateWalletOwnership
 };

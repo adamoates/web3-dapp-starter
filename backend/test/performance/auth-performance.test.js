@@ -1,8 +1,13 @@
 const request = require("supertest");
-const { app } = require("../../src/index");
+const { createTestApp } = require("../setup/real");
 const { createTestUser, generateUserData } = require("../helpers/testHelpers");
 
 describe("Auth Performance Tests", () => {
+  let app;
+
+  beforeAll(async () => {
+    app = await createTestApp();
+  });
   describe("Password Hashing Performance", () => {
     it("should hash passwords within reasonable time", async () => {
       const userData = generateUserData();

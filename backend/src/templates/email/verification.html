@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Verify Your Email</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, sans-serif;
+        line-height: 1.6;
+        color: #1f2937;
+        margin: 0;
+        padding: 0;
+        background-color: #f9fafb;
+      }
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background-color: #ffffff;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      }
+      .header {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        color: white;
+        padding: 40px 30px;
+        text-align: center;
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .content {
+        padding: 40px 30px;
+      }
+      .verification-code {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 12px;
+        text-align: center;
+        margin: 30px 0;
+      }
+      .code {
+        font-size: 36px;
+        font-weight: 700;
+        letter-spacing: 8px;
+        margin: 20px 0;
+        font-family: "Courier New", monospace;
+      }
+      .cta-button {
+        display: inline-block;
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        color: white;
+        padding: 16px 32px;
+        text-decoration: none;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 16px;
+        margin: 24px 0;
+        transition: transform 0.2s;
+      }
+      .cta-button:hover {
+        transform: translateY(-2px);
+      }
+      .security-info {
+        background-color: #fef3c7;
+        border: 1px solid #f59e0b;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 24px 0;
+      }
+      .security-info h4 {
+        color: #92400e;
+        margin: 0 0 12px 0;
+      }
+      .footer {
+        background-color: #f9fafb;
+        padding: 30px;
+        text-align: center;
+        color: #6b7280;
+        font-size: 14px;
+      }
+      .warning {
+        color: #dc2626;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🔐 Verify Your Email</h1>
+        <p>Complete your account setup securely</p>
+      </div>
+
+      <div class="content">
+        <p>Hi {{userName}},</p>
+
+        <p>
+          To complete your account setup and start using DApp, please verify
+          your email address.
+        </p>
+
+        <div class="verification-code">
+          <h3>Your Verification Code</h3>
+          <div class="code">{{verificationCode}}</div>
+          <p>Enter this code in the verification form</p>
+        </div>
+
+        <p>Or click the button below to verify automatically:</p>
+
+        <div style="text-align: center">
+          <a href="{{verificationLink}}" class="cta-button"
+            >Verify Email Address</a
+          >
+        </div>
+
+        <div class="security-info">
+          <h4>🔒 Security Information</h4>
+          <ul>
+            <li>
+              This verification link will expire in <strong>24 hours</strong>
+            </li>
+            <li>Never share this code with anyone</li>
+            <li>DApp will never ask for your password via email</li>
+            <li>If you didn't create this account, please ignore this email</li>
+          </ul>
+        </div>
+
+        <p>After verification, you'll have access to:</p>
+        <ul>
+          <li>✅ Full DApp functionality</li>
+          <li>✅ NFT creation and trading</li>
+          <li>✅ DeFi protocol access</li>
+          <li>✅ Smart contract deployment</li>
+          <li>✅ Community features</li>
+        </ul>
+
+        <p>
+          If you have any issues or questions, please contact our support team.
+        </p>
+
+        <p>Best regards,<br /><strong>The DApp Security Team</strong></p>
+      </div>
+
+      <div class="footer">
+        <p class="warning">
+          ⚠️ This is a security-sensitive email. Keep it private.
+        </p>
+        <p>© 2024 DApp. All rights reserved.</p>
+        <p>
+          If you didn't request this verification, please contact support
+          immediately.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+FROM node:18-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    curl \
+    wget \
+    unzip \
+    openjdk11-jre
+
+# Install Allure commandline
+RUN npm install -g allure-commandline --save-dev
+
+# Create app directory
+WORKDIR /usr/src/app
+
+# Install app dependencies
+COPY package*.json ./
+RUN npm install
+
+# Bundle app source
+COPY . .
+
+# Create directories for Allure results and reports
+RUN mkdir -p allure-results allure-report
+
+# Expose backend port
+EXPOSE 5000
+
+# Default command
+CMD ["npm", "run", "test:allure"] 

@@ -1,13 +1,17 @@
 const request = require("supertest");
-const { app, dbManager } = require("../../src/index");
+const { createApp, dbManager } = require("../../src/index");
 
 describe("Multi-Database Architecture Integration Tests", () => {
+  let app;
   let testUser;
   let authToken;
 
   beforeAll(async () => {
     // Ensure databases are connected
     await dbManager.connect();
+
+    // Create app instance
+    app = await createApp({ dbManager });
   });
 
   afterAll(async () => {

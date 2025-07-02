@@ -171,7 +171,7 @@ async function main() {
   const environment = process.argv[3] || "development";
   const steps = parseInt(process.argv[4]) || 1;
 
-  const config = environment === "test" ? testConfig : config;
+  const config = environment === "test" ? testConfig : developmentConfig;
   const migrationsDir = path.join(__dirname, "..", "migrations");
 
   console.log(`🌍 Environment: ${environment}`);

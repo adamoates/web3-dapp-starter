@@ -1,10 +1,16 @@
+jest.setTimeout(120000);
 const request = require("supertest");
-const { app } = require("../../src/index");
 const { faker } = require("@faker-js/faker");
+const { createTestApp } = require("../setup/real");
 
 describe("Web3 Integration Tests", () => {
+  let app;
   let testUser;
   let authToken;
+
+  beforeAll(async () => {
+    app = await createTestApp();
+  });
 
   beforeEach(async () => {
     // Create a test user for authenticated requests

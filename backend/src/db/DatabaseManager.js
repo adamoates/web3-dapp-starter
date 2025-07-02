@@ -1,46 +1,29 @@
-const { Pool } = require("pg");
-const mongoose = require("mongoose");
-const Redis = require("ioredis");
+const { setupDatabase, getDatabase, closeDatabase } = require("../database");
 
 class DatabaseManager {
   constructor() {
-    this.postgres = null;
-    this.redis = null;
-    this.mongoConnection = null;
+    this.databases = null;
   }
 
   async connect() {
     try {
-      // PostgreSQL for structured data
-      this.postgres = new Pool({
-        connectionString: process.env.POSTGRES_URI || process.env.POSTGRES_URL,
-        max: 20,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 2000
-      });
-
-      // MongoDB for flexible documents
-      this.mongoConnection = await mongoose.connect(
-        process.env.MONGO_URI || process.env.MONGO_URL,
-        {
-          maxPoolSize: 10,
-          serverSelectionTimeoutMS: 5000,
-          socketTimeoutMS: 45000
-        }
-      );
-
-      // Redis for caching and sessions
-      this.redis = new Redis({
-        host: process.env.REDIS_HOST || "redis",
-        port: process.env.REDIS_PORT || 6379,
-        retryDelayOnFailover: 100,
-        maxRetriesPerRequest: 3
-      });
-
-      console.log("✅ All databases connected");
+      // Use the centralized database setup
+      this.databases = setupDatabase();
+      console.log("✅ All databases connected via DatabaseManager");
       return this;
     } catch (error) {
       console.error("❌ Database connection failed:", error);
+      throw error;
+    }
+  }
+
+  async disconnect() {
+    try {
+      await closeDatabase();
+      this.databases = null;
+      console.log("✅ All databases disconnected via DatabaseManager");
+    } catch (error) {
+      console.error("❌ Database disconnection failed:", error);
       throw error;
     }
   }
@@ -53,9 +36,13 @@ class DatabaseManager {
       timestamp: new Date().toISOString()
     };
 
+    if (!this.databases) {
+      return health;
+    }
+
     try {
       // Check PostgreSQL
-      await this.postgres.query("SELECT 1");
+      await this.databases.postgres.query("SELECT 1");
       health.postgres = true;
     } catch (error) {
       console.error("PostgreSQL health check failed:", error.message);
@@ -63,7 +50,7 @@ class DatabaseManager {
 
     try {
       // Check MongoDB
-      await mongoose.connection.db.admin().ping();
+      await this.databases.mongo.db.admin().ping();
       health.mongodb = true;
     } catch (error) {
       console.error("MongoDB health check failed:", error.message);
@@ -71,7 +58,7 @@ class DatabaseManager {
 
     try {
       // Check Redis
-      await this.redis.ping();
+      await this.databases.redis.ping();
       health.redis = true;
     } catch (error) {
       console.error("Redis health check failed:", error.message);
@@ -80,23 +67,17 @@ class DatabaseManager {
     return health;
   }
 
-  async disconnect() {
-    if (this.postgres) await this.postgres.end();
-    if (this.mongoConnection) await mongoose.disconnect();
-    if (this.redis) await this.redis.quit();
-  }
-
   // Getter methods for easy access
   get postgresPool() {
-    return this.postgres;
+    return this.databases?.postgres;
   }
 
   get redisClient() {
-    return this.redis;
+    return this.databases?.redis;
   }
 
   get mongooseConnection() {
-    return this.mongoConnection;
+    return this.databases?.mongo;
   }
 }
 

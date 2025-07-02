@@ -1,7 +1,12 @@
 const request = require("supertest");
-const app = require("../../src/app");
+const createApp = require("../../src/app");
 
 describe("Web3 Routes Mock Integration", () => {
+  let app;
+
+  beforeAll(async () => {
+    app = await createApp();
+  });
   const validToken = "mock.jwt.token.string";
 
   describe("GET /api/web3/stats/:contractAddress", () => {

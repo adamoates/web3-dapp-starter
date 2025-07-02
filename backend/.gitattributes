@@ -1,0 +1,48 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# JavaScript files
+*.js text eol=lf
+*.jsx text eol=lf
+*.json text eol=lf
+
+# HTML and CSS files
+*.html text eol=lf
+*.css text eol=lf
+
+# Configuration files
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.config.js text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+
+# SQL files
+*.sql text eol=lf
+
+# Binary files (should not be tracked)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg text eol=lf
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.rar binary
+
+# Log files (should not be tracked)
+*.log text eol=lf
+
+# Environment files (should not be tracked)
+.env* text eol=lf
+
+# Generated files (should not be tracked)
+coverage/ export-ignore
+allure-results/ export-ignore
+allure-report/ export-ignore
+node_modules/ export-ignore 

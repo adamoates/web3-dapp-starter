@@ -1,8 +1,13 @@
 const request = require("supertest");
-const { app } = require("../../src/index");
 const { faker } = require("@faker-js/faker");
+const { createTestApp } = require("../setup/real");
 
 describe("Auth Integration Tests (Simplified)", () => {
+  let app;
+
+  beforeAll(async () => {
+    app = await createTestApp();
+  });
   describe("POST /api/auth/register", () => {
     it("should register a new user successfully", async () => {
       const userData = {
@@ -323,6 +328,12 @@ describe("Auth Integration Tests (Simplified)", () => {
 });
 
 describe("Auth Integration Tests (Real Databases)", () => {
+  let app;
+
+  beforeAll(async () => {
+    app = await createTestApp();
+  });
+
   describe("POST /api/auth/register", () => {
     it("should register user with real database", async () => {
       const userData = {

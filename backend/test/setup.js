@@ -26,23 +26,6 @@ jest.mock("../src/db/DatabaseManager", () => {
   }));
 });
 
-// Mock MinIO service
-jest.mock("../src/services/MinIOService", () => {
-  return jest.fn().mockImplementation(() => ({
-    init: jest.fn().mockResolvedValue(true),
-    healthCheck: jest.fn().mockResolvedValue({
-      status: "healthy",
-      timestamp: new Date().toISOString()
-    }),
-    generateFileName: jest.fn().mockReturnValue("test-file-name"),
-    uploadFile: jest.fn().mockResolvedValue({
-      url: "https://test.com/file",
-      fileName: "test-file-name"
-    }),
-    deleteFile: jest.fn().mockResolvedValue(true)
-  }));
-});
-
 // Mock nodemailer
 jest.mock("nodemailer", () => ({
   createTransporter: jest.fn().mockReturnValue({
@@ -60,8 +43,7 @@ process.env.MONGODB_URL = "mongodb://localhost:27017/test";
 process.env.REDIS_URL = "redis://localhost:6379";
 process.env.MINIO_ENDPOINT = "localhost";
 process.env.MINIO_PORT = "9000";
-process.env.MINIO_ACCESS_KEY = "test";
-process.env.MINIO_SECRET_KEY = "test";
+// MinIO credentials removed for anonymous access
 process.env.MINIO_BUCKET = "test";
 process.env.MAIL_HOST = "localhost";
 process.env.MAIL_PORT = "1025";
