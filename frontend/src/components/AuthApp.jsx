@@ -7,6 +7,7 @@ import PasswordResetForm from "./auth/PasswordResetForm";
 import EmailVerification from "./auth/EmailVerification";
 import Dashboard from "./auth/Dashboard";
 import WalletConnector from "./auth/WalletConnector";
+import WalletProfileForm from "./auth/WalletProfileForm";
 import {
   FiShield,
   FiLoader,
@@ -31,6 +32,7 @@ const AuthApp = () => {
     loading,
     error,
     registrationSuccess,
+    newWalletUser,
     clearError,
     clearRegistrationSuccess
   } = useAuth();
@@ -57,6 +59,13 @@ const AuthApp = () => {
     }
   }, [registrationSuccess, clearRegistrationSuccess]);
 
+  // Handle new wallet user requiring profile completion
+  useEffect(() => {
+    if (newWalletUser) {
+      setCurrentView("wallet-profile");
+    }
+  }, [newWalletUser]);
+
   const handleViewChange = (view) => {
     setCurrentView(view);
     clearError();
@@ -71,6 +80,10 @@ const AuthApp = () => {
   const handleVerificationComplete = () => {
     setCurrentView("login");
     setVerificationEmail("");
+  };
+
+  const handleProfileComplete = () => {
+    setCurrentView("dashboard");
   };
 
   const handleWalletConnect = () => {
@@ -101,7 +114,7 @@ const AuthApp = () => {
     };
 
     try {
-      const response = await fetch(`http://localhost:3001${endpoint}`, config);
+      const response = await fetch(`http://localhost:5001${endpoint}`, config);
       const data = await response.json();
 
       return {
@@ -207,6 +220,8 @@ const AuthApp = () => {
             <Dashboard />
           </div>
         );
+      case "wallet-profile":
+        return <WalletProfileForm onComplete={handleProfileComplete} />;
       default:
         return <LoginForm />;
     }

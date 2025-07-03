@@ -1,5 +1,5 @@
 const User = require("../models/sql/User");
-const UserActivity = require("../models/nosql/UserActivity");
+const UserActivityModel = require("../models/nosql/UserActivity").Model;
 const crypto = require("crypto");
 const Transaction = require("../models/sql/Transaction");
 const EmailService = require("./EmailService");
@@ -26,7 +26,7 @@ class UserService {
       }
 
       // Log activity in MongoDB with tenant context
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId: user.id,
         tenantId: user.tenant_id,
         action: "user_registered",
@@ -40,7 +40,6 @@ class UserService {
         userAgent,
         sessionId: this.generateSessionId(user.id, user.tenant_id)
       });
-      await activity.save();
 
       // Cache user session in Redis with tenant isolation
       const sessionKey = `tenant:${user.tenant_id}:user_session:${user.id}`;
@@ -120,7 +119,7 @@ class UserService {
       const token = this.user.generateToken(user.id, user.tenant_id, sessionId);
 
       // Log activity in MongoDB with tenant context
-      const activity = new UserActivity({
+      await UserActivityModel.create({
         userId: user.id,
         tenantId: user.tenant_id,
         action: "user_login",
@@ -133,7 +132,6 @@ class UserService {
         userAgent,
         sessionId
       });
-      await activity.save();
 
       // Cache session in Redis with tenant isolation
       const sessionKey = `tenant:${user.tenant_id}:user_session:${user.id}`;
@@ -183,7 +181,7 @@ class UserService {
       }
 
       // Log activity with tenant context
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId: user.id,
         tenantId: user.tenant_id,
         action: "email_verified",
@@ -193,7 +191,6 @@ class UserService {
         },
         sessionId: this.generateSessionId(user.id, user.tenant_id)
       });
-      await activity.save();
 
       // Update cache with tenant isolation
       const profileKey = `tenant:${user.tenant_id}:user_profile:${user.id}`;
@@ -234,12 +231,12 @@ class UserService {
       );
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId: user.id,
+        tenantId: user.tenant_id,
         action: "verification_email_resent",
         details: { email: user.email }
       });
-      await activity.save();
 
       return { message: "Verification email sent successfully" };
     } catch (error) {
@@ -261,12 +258,12 @@ class UserService {
       );
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId: user.id,
+        tenantId: user.tenant_id,
         action: "password_reset_requested",
         details: { email: user.email }
       });
-      await activity.save();
 
       return { message: "Password reset email sent successfully" };
     } catch (error) {
@@ -282,12 +279,12 @@ class UserService {
       }
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId: user.id,
+        tenantId: user.tenant_id,
         action: "password_reset_completed",
         details: { email: user.email }
       });
-      await activity.save();
 
       // Clear cache
       const sessionKey = `user_session:${user.id}`;
@@ -322,12 +319,12 @@ class UserService {
       await this.emailService.sendTwoFactorEmail(user, twoFactorCode);
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId: user.id,
+        tenantId: user.tenant_id,
         action: "2fa_code_sent",
         details: { email: user.email }
       });
-      await activity.save();
 
       return { message: "2FA code sent successfully" };
     } catch (error) {
@@ -348,12 +345,12 @@ class UserService {
       await this.databases.redis.del(codeKey);
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId,
+        tenantId: 1, // Default tenant for 2FA operations
         action: "2fa_verified",
         details: { method: "email" }
       });
-      await activity.save();
 
       return { message: "2FA verification successful" };
     } catch (error) {
@@ -367,12 +364,12 @@ class UserService {
       const user = await this.user.enableTwoFactor(userId, secret);
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId,
+        tenantId: 1, // Default tenant for 2FA operations
         action: "2fa_enabled",
         details: { method: "email" }
       });
-      await activity.save();
 
       return { message: "Two-factor authentication enabled", secret };
     } catch (error) {
@@ -385,12 +382,12 @@ class UserService {
       const user = await this.user.disableTwoFactor(userId);
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId,
+        tenantId: 1, // Default tenant for 2FA operations
         action: "2fa_disabled",
         details: { method: "email" }
       });
-      await activity.save();
 
       return { message: "Two-factor authentication disabled" };
     } catch (error) {
@@ -408,12 +405,12 @@ class UserService {
       await this.emailService.sendSecurityAlert(user, alertType, details);
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId,
+        tenantId: user.tenant_id,
         action: "security_alert_sent",
         details: { alertType, ...details }
       });
-      await activity.save();
 
       return { message: "Security alert sent successfully" };
     } catch (error) {
@@ -446,7 +443,7 @@ class UserService {
       const user = await this.user.linkWallet(userId, walletAddress);
 
       // Log activity with tenant context
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId,
         tenantId: user.tenant_id,
         action: "wallet_linked",
@@ -457,7 +454,6 @@ class UserService {
         },
         ipAddress
       });
-      await activity.save();
 
       // Update cache with tenant isolation
       const profileKey = `tenant:${user.tenant_id}:user_profile:${userId}`;
@@ -527,7 +523,7 @@ class UserService {
 
   async getUserActivity(userId, limit = 20, offset = 0) {
     try {
-      const activities = await UserActivity.find({ userId })
+      const activities = await UserActivityModel.find({ userId })
         .sort({ createdAt: -1 })
         .limit(limit)
         .skip(offset);
@@ -541,12 +537,14 @@ class UserService {
 
   async getUserStats(userId) {
     try {
-      const totalActivities = await UserActivity.countDocuments({ userId });
-      const loginCount = await UserActivity.countDocuments({
+      const totalActivities = await UserActivityModel.countDocuments({
+        userId
+      });
+      const loginCount = await UserActivityModel.countDocuments({
         userId,
         action: "user_login"
       });
-      const walletLinked = await UserActivity.countDocuments({
+      const walletLinked = await UserActivityModel.countDocuments({
         userId,
         action: "wallet_linked"
       });
@@ -555,7 +553,7 @@ class UserService {
         totalActivities,
         loginCount,
         walletLinked,
-        lastActivity: await UserActivity.findOne({ userId })
+        lastActivity: await UserActivityModel.findOne({ userId })
           .sort({ createdAt: -1 })
           .select("action createdAt")
       };
@@ -596,7 +594,7 @@ class UserService {
       await this.databases.redis.srem(activeSessionsKey, sessionId);
 
       // Log activity with tenant context
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId,
         tenantId,
         action: "user_logout",
@@ -607,7 +605,6 @@ class UserService {
         },
         sessionId
       });
-      await activity.save();
 
       return { message: "Logged out successfully" };
     } catch (error) {
@@ -668,13 +665,13 @@ class UserService {
       const user = await this.user.updateProfile(userId, updates);
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId,
+        tenantId: user.tenant_id,
         action: "profile_updated",
         details: { updatedFields: Object.keys(updates) },
         ipAddress
       });
-      await activity.save();
 
       // Update cache
       const profileKey = `user_profile:${userId}`;
@@ -749,14 +746,13 @@ class UserService {
       await this.databases.redis.del(sessionKey);
 
       // Log activity
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId,
         tenantId,
         action: "session_revoked",
         details: { sessionId, tenantId },
         sessionId
       });
-      await activity.save();
 
       return { message: "Session revoked successfully" };
     } catch (error) {
@@ -795,9 +791,9 @@ class UserService {
       ); // 5 minutes
 
       // Log challenge generation
-      const activity = new UserActivity({
-        userId: null, // Not authenticated yet
-        tenantId,
+      const activity = await UserActivityModel.create({
+        userId: 0, // System user for unauthenticated actions
+        tenantId: tenantId || 1, // Default tenant if not provided
         action: "wallet_challenge_generated",
         details: {
           walletAddress,
@@ -805,7 +801,6 @@ class UserService {
           expiresAt: expiresAt.toISOString()
         }
       });
-      await activity.save();
 
       return {
         message,
@@ -865,7 +860,7 @@ class UserService {
       let user = await this.user.findByWallet(walletAddress, tenantId);
 
       if (!user) {
-        // Create new user with wallet
+        // Create new user with wallet - but mark as incomplete
         user = await this.user.create({
           email: null, // Wallet-only user
           password: null,
@@ -873,14 +868,36 @@ class UserService {
           walletAddress,
           tenantId
         });
+
+        // Log new wallet user creation
+        const activity = await UserActivityModel.create({
+          userId: user.id,
+          tenantId: user.tenant_id,
+          action: "wallet_user_created",
+          details: {
+            walletAddress,
+            method: "signature_verification",
+            profileComplete: false
+          }
+        });
+
+        // Return special response for new users
+        return {
+          user,
+          token: null, // No token until profile is complete
+          sessionId: null,
+          isNewUser: true,
+          requiresProfileCompletion: true
+        };
       }
 
+      // Existing user - proceed with normal login
       // Generate session and token
       const sessionId = this.generateSessionId(user.id, user.tenant_id);
       const token = this.user.generateToken(user.id, user.tenant_id, sessionId);
 
       // Log successful authentication
-      const activity = new UserActivity({
+      const activity = await UserActivityModel.create({
         userId: user.id,
         tenantId: user.tenant_id,
         action: "wallet_authenticated",
@@ -890,7 +907,98 @@ class UserService {
           sessionId
         }
       });
-      await activity.save();
+
+      // Cache session with tenant isolation
+      const sessionKey = `tenant:${user.tenant_id}:user_session:${user.id}`;
+      const sessionData = {
+        ...user,
+        sessionId,
+        lastActivity: new Date().toISOString(),
+        tenantId: user.tenant_id
+      };
+      await this.databases.redis.setex(
+        sessionKey,
+        3600,
+        JSON.stringify(sessionData)
+      );
+
+      // Store JWT with tenant isolation
+      const tokenKey = `tenant:${user.tenant_id}:jwt:${user.id}:${
+        token.split(".")[2]
+      }`;
+      await this.databases.redis.setex(
+        tokenKey,
+        86400,
+        JSON.stringify({
+          sessionId,
+          issuedAt: new Date().toISOString(),
+          tenantId: user.tenant_id
+        })
+      );
+
+      // Track active sessions
+      const activeSessionsKey = `tenant:${user.tenant_id}:active_sessions`;
+      await this.databases.redis.sadd(activeSessionsKey, sessionId);
+      await this.databases.redis.expire(activeSessionsKey, 86400);
+
+      return { user, token, sessionId, isNewUser: false };
+    } catch (error) {
+      console.error("Verify wallet signature failed:", error);
+      throw error;
+    }
+  }
+
+  async completeWalletUserProfile(userId, profileData, tenantId = null) {
+    try {
+      // Validate required fields
+      if (!profileData.name || profileData.name.trim().length < 2) {
+        throw new Error("Name is required and must be at least 2 characters");
+      }
+
+      // Update user profile
+      const updates = {
+        name: profileData.name.trim(),
+        email: profileData.email ? profileData.email.trim() : null,
+        is_verified: true // Wallet users are considered verified
+      };
+
+      // Update in database
+      const result = await this.pool.query(
+        `
+        UPDATE users 
+        SET name = $1, 
+            email = $2, 
+            is_verified = $3,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $4 AND tenant_id = $5
+        RETURNING id, email, name, wallet_address, is_verified, tenant_id
+      `,
+        [updates.name, updates.email, updates.is_verified, userId, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error("User not found");
+      }
+
+      const user = result.rows[0];
+
+      // Generate session and token now that profile is complete
+      const sessionId = this.generateSessionId(user.id, user.tenant_id);
+      const token = this.user.generateToken(user.id, user.tenant_id, sessionId);
+
+      // Log profile completion
+      const activity = await UserActivityModel.create({
+        userId: user.id,
+        tenantId: user.tenant_id,
+        action: "wallet_profile_completed",
+        details: {
+          walletAddress: user.wallet_address,
+          profileData: {
+            name: user.name,
+            email: user.email
+          }
+        }
+      });
 
       // Cache session with tenant isolation
       const sessionKey = `tenant:${user.tenant_id}:user_session:${user.id}`;
@@ -927,7 +1035,7 @@ class UserService {
 
       return { user, token, sessionId };
     } catch (error) {
-      console.error("Verify wallet signature failed:", error);
+      console.error("Complete wallet user profile failed:", error);
       throw error;
     }
   }

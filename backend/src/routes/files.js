@@ -1,8 +1,6 @@
 const express = require("express");
-const {
-  createUploadMiddleware,
-  authenticateToken
-} = require("../middleware/upload");
+const { createUploadMiddleware } = require("../middleware/upload");
+const { authenticateToken } = require("../middleware/auth");
 const MinIOService = require("../services/MinIOService");
 const UserActivity = require("../models/nosql/UserActivity");
 
@@ -56,6 +54,7 @@ const createFileRouter = (databases) => {
       // Log activity in MongoDB
       const activity = new UserActivity({
         userId: req.user.id,
+        tenantId: req.user.tenant_id,
         action: "avatar_uploaded",
         details: {
           fileName: result.fileName,
@@ -110,8 +109,8 @@ const createFileRouter = (databases) => {
       // Store file metadata in PostgreSQL
       const fileResult = await databases.postgresPool.query(
         `
-        INSERT INTO user_files (user_id, filename, original_name, file_url, file_size, mime_type, description)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO user_files (user_id, filename, original_name, file_url, file_size, mime_type, description, tenant_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id, filename, original_name, file_url, file_size, mime_type, description, created_at
       `,
         [
@@ -121,13 +120,15 @@ const createFileRouter = (databases) => {
           result.url,
           result.size,
           result.mimetype,
-          req.body.description || null
+          req.body.description || null,
+          req.user.tenant_id
         ]
       );
 
       // Log activity in MongoDB
       const activity = new UserActivity({
         userId: req.user.id,
+        tenantId: req.user.tenant_id,
         action: "document_uploaded",
         details: {
           fileId: fileResult.rows[0].id,
@@ -179,6 +180,7 @@ const createFileRouter = (databases) => {
       // Log activity in MongoDB
       const activity = new UserActivity({
         userId: req.user.id,
+        tenantId: req.user.tenant_id,
         action: "nft_asset_uploaded",
         details: {
           fileName: result.fileName,
@@ -203,185 +205,171 @@ const createFileRouter = (databases) => {
   });
 
   // Get user files
-  router.get(
-    "/my-files",
-    authenticateToken(databases.postgresPool),
-    async (req, res) => {
-      try {
-        const limit = parseInt(req.query.limit) || 50;
-        const offset = parseInt(req.query.offset) || 0;
+  router.get("/my-files", authenticateToken, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 50;
+      const offset = parseInt(req.query.offset) || 0;
 
-        const result = await databases.postgresPool.query(
-          `
+      const result = await databases.postgresPool.query(
+        `
         SELECT id, filename, original_name, file_url, file_size, mime_type, description, created_at
         FROM user_files 
         WHERE user_id = $1 
         ORDER BY created_at DESC
         LIMIT $2 OFFSET $3
       `,
-          [req.user.id, limit, offset]
-        );
+        [req.user.id, limit, offset]
+      );
 
-        // Get total count
-        const countResult = await databases.postgresPool.query(
-          "SELECT COUNT(*) as total FROM user_files WHERE user_id = $1",
-          [req.user.id]
-        );
+      // Get total count
+      const countResult = await databases.postgresPool.query(
+        "SELECT COUNT(*) as total FROM user_files WHERE user_id = $1",
+        [req.user.id]
+      );
 
-        res.json({
-          files: result.rows,
-          pagination: {
-            limit,
-            offset,
-            total: parseInt(countResult.rows[0].total),
-            hasMore: offset + limit < parseInt(countResult.rows[0].total)
-          }
-        });
-      } catch (error) {
-        console.error("Get files error:", error);
-        res.status(500).json({ error: "Failed to retrieve files" });
-      }
+      res.json({
+        files: result.rows,
+        pagination: {
+          limit,
+          offset,
+          total: parseInt(countResult.rows[0].total),
+          hasMore: offset + limit < parseInt(countResult.rows[0].total)
+        }
+      });
+    } catch (error) {
+      console.error("Get files error:", error);
+      res.status(500).json({ error: "Failed to retrieve files" });
     }
-  );
+  });
 
   // Get file by ID
-  router.get(
-    "/file/:fileId",
-    authenticateToken(databases.postgresPool),
-    async (req, res) => {
-      try {
-        const { fileId } = req.params;
+  router.get("/file/:fileId", authenticateToken, async (req, res) => {
+    try {
+      const { fileId } = req.params;
 
-        const result = await databases.postgresPool.query(
-          `
+      const result = await databases.postgresPool.query(
+        `
         SELECT id, filename, original_name, file_url, file_size, mime_type, description, created_at
         FROM user_files 
         WHERE id = $1 AND user_id = $2
       `,
-          [fileId, req.user.id]
-        );
+        [fileId, req.user.id]
+      );
 
-        if (result.rows.length === 0) {
-          return res.status(404).json({ error: "File not found" });
-        }
-
-        res.json({ file: result.rows[0] });
-      } catch (error) {
-        console.error("Get file error:", error);
-        res.status(500).json({ error: "Failed to retrieve file" });
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "File not found" });
       }
+
+      res.json({ file: result.rows[0] });
+    } catch (error) {
+      console.error("Get file error:", error);
+      res.status(500).json({ error: "Failed to retrieve file" });
     }
-  );
+  });
 
   // Delete file
-  router.delete(
-    "/file/:fileId",
-    authenticateToken(databases.postgresPool),
-    async (req, res) => {
-      try {
-        const { fileId } = req.params;
+  router.delete("/file/:fileId", authenticateToken, async (req, res) => {
+    try {
+      const { fileId } = req.params;
 
-        // Verify file belongs to user
-        const fileResult = await databases.postgresPool.query(
-          "SELECT * FROM user_files WHERE id = $1 AND user_id = $2",
-          [fileId, req.user.id]
-        );
+      // Verify file belongs to user
+      const fileResult = await databases.postgresPool.query(
+        "SELECT * FROM user_files WHERE id = $1 AND user_id = $2",
+        [fileId, req.user.id]
+      );
 
-        if (fileResult.rows.length === 0) {
-          return res.status(404).json({ error: "File not found" });
-        }
-
-        const file = fileResult.rows[0];
-
-        // Delete from MinIO
-        await minioService.deleteFile(
-          minioService.buckets.documents,
-          file.filename
-        );
-
-        // Delete from database
-        await databases.postgresPool.query(
-          "DELETE FROM user_files WHERE id = $1 AND user_id = $2",
-          [fileId, req.user.id]
-        );
-
-        // Log activity in MongoDB
-        const activity = new UserActivity({
-          userId: req.user.id,
-          action: "file_deleted",
-          details: {
-            fileId: parseInt(fileId),
-            fileName: file.filename,
-            originalName: file.original_name
-          },
-          ipAddress: req.ip,
-          userAgent: req.get("User-Agent")
-        });
-        await activity.save();
-
-        res.json({ message: "File deleted successfully" });
-      } catch (error) {
-        console.error("Delete file error:", error);
-        res.status(500).json({ error: "Failed to delete file" });
+      if (fileResult.rows.length === 0) {
+        return res.status(404).json({ error: "File not found" });
       }
+
+      const file = fileResult.rows[0];
+
+      // Delete from MinIO
+      await minioService.deleteFile(
+        minioService.buckets.documents,
+        file.filename
+      );
+
+      // Delete from database
+      await databases.postgresPool.query(
+        "DELETE FROM user_files WHERE id = $1 AND user_id = $2",
+        [fileId, req.user.id]
+      );
+
+      // Log activity in MongoDB
+      const activity = new UserActivity({
+        userId: req.user.id,
+        tenantId: req.user.tenant_id,
+        action: "file_deleted",
+        details: {
+          fileId: parseInt(fileId),
+          fileName: file.filename,
+          originalName: file.original_name
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent")
+      });
+      await activity.save();
+
+      res.json({ message: "File deleted successfully" });
+    } catch (error) {
+      console.error("Delete file error:", error);
+      res.status(500).json({ error: "Failed to delete file" });
     }
-  );
+  });
 
   // Get file download URL
-  router.get(
-    "/download/:fileId",
-    authenticateToken(databases.postgresPool),
-    async (req, res) => {
-      try {
-        const { fileId } = req.params;
+  router.get("/download/:fileId", authenticateToken, async (req, res) => {
+    try {
+      const { fileId } = req.params;
 
-        // Verify file belongs to user
-        const fileResult = await databases.postgresPool.query(
-          "SELECT * FROM user_files WHERE id = $1 AND user_id = $2",
-          [fileId, req.user.id]
-        );
+      // Verify file belongs to user
+      const fileResult = await databases.postgresPool.query(
+        "SELECT * FROM user_files WHERE id = $1 AND user_id = $2",
+        [fileId, req.user.id]
+      );
 
-        if (fileResult.rows.length === 0) {
-          return res.status(404).json({ error: "File not found" });
-        }
-
-        const file = fileResult.rows[0];
-        const downloadUrl = await minioService.getFileUrl(
-          minioService.buckets.documents,
-          file.filename,
-          3600
-        ); // 1 hour expiry
-
-        // Log download activity
-        const activity = new UserActivity({
-          userId: req.user.id,
-          action: "file_downloaded",
-          details: {
-            fileId: parseInt(fileId),
-            fileName: file.filename,
-            originalName: file.original_name
-          },
-          ipAddress: req.ip,
-          userAgent: req.get("User-Agent")
-        });
-        await activity.save();
-
-        res.json({
-          downloadUrl,
-          filename: file.original_name,
-          expires: new Date(Date.now() + 3600000).toISOString()
-        });
-      } catch (error) {
-        console.error("Download URL error:", error);
-        res.status(500).json({ error: "Failed to generate download URL" });
+      if (fileResult.rows.length === 0) {
+        return res.status(404).json({ error: "File not found" });
       }
+
+      const file = fileResult.rows[0];
+      const downloadUrl = await minioService.getFileUrl(
+        minioService.buckets.documents,
+        file.filename,
+        3600
+      ); // 1 hour expiry
+
+      // Log download activity
+      const activity = new UserActivity({
+        userId: req.user.id,
+        tenantId: req.user.tenant_id,
+        action: "file_downloaded",
+        details: {
+          fileId: parseInt(fileId),
+          fileName: file.filename,
+          originalName: file.original_name
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent")
+      });
+      await activity.save();
+
+      res.json({
+        downloadUrl,
+        filename: file.original_name,
+        expires: new Date(Date.now() + 3600000).toISOString()
+      });
+    } catch (error) {
+      console.error("Download URL error:", error);
+      res.status(500).json({ error: "Failed to generate download URL" });
     }
-  );
+  });
 
   // Update file description
   router.put(
     "/file/:fileId/description",
-    authenticateToken(databases.postgresPool),
+    authenticateToken,
     async (req, res) => {
       try {
         const { fileId } = req.params;
@@ -417,14 +405,11 @@ const createFileRouter = (databases) => {
   );
 
   // Get file statistics
-  router.get(
-    "/stats",
-    authenticateToken(databases.postgresPool),
-    async (req, res) => {
-      try {
-        // Get file count and total size
-        const statsResult = await databases.postgresPool.query(
-          `
+  router.get("/stats", authenticateToken, async (req, res) => {
+    try {
+      // Get file count and total size
+      const statsResult = await databases.postgresPool.query(
+        `
         SELECT 
           COUNT(*) as total_files,
           SUM(file_size) as total_size,
@@ -433,92 +418,87 @@ const createFileRouter = (databases) => {
         FROM user_files 
         WHERE user_id = $1
       `,
-          [req.user.id]
-        );
+        [req.user.id]
+      );
 
-        // Get recent uploads
-        const recentResult = await databases.postgresPool.query(
-          `
+      // Get recent uploads
+      const recentResult = await databases.postgresPool.query(
+        `
         SELECT original_name, file_size, created_at
         FROM user_files 
         WHERE user_id = $1 
         ORDER BY created_at DESC 
         LIMIT 5
       `,
-          [req.user.id]
-        );
+        [req.user.id]
+      );
 
-        res.json({
-          stats: {
-            totalFiles: parseInt(statsResult.rows[0].total_files),
-            totalSize: parseInt(statsResult.rows[0].total_size) || 0,
-            imageFiles: parseInt(statsResult.rows[0].image_files),
-            documentFiles: parseInt(statsResult.rows[0].document_files)
-          },
-          recentUploads: recentResult.rows
-        });
-      } catch (error) {
-        console.error("Get stats error:", error);
-        res.status(500).json({ error: "Failed to get file statistics" });
-      }
+      res.json({
+        stats: {
+          totalFiles: parseInt(statsResult.rows[0].total_files),
+          totalSize: parseInt(statsResult.rows[0].total_size) || 0,
+          imageFiles: parseInt(statsResult.rows[0].image_files),
+          documentFiles: parseInt(statsResult.rows[0].document_files)
+        },
+        recentUploads: recentResult.rows
+      });
+    } catch (error) {
+      console.error("Get stats error:", error);
+      res.status(500).json({ error: "Failed to get file statistics" });
     }
-  );
+  });
 
   // Search files
-  router.get(
-    "/search",
-    authenticateToken(databases.postgresPool),
-    async (req, res) => {
-      try {
-        const { q: query, type: fileType } = req.query;
-        const limit = parseInt(req.query.limit) || 20;
-        const offset = parseInt(req.query.offset) || 0;
+  router.get("/search", authenticateToken, async (req, res) => {
+    try {
+      const { q: query, type: fileType } = req.query;
+      const limit = parseInt(req.query.limit) || 20;
+      const offset = parseInt(req.query.offset) || 0;
 
-        let sql = `
+      let sql = `
         SELECT id, filename, original_name, file_url, file_size, mime_type, description, created_at
         FROM user_files 
         WHERE user_id = $1
       `;
-        const params = [req.user.id];
-        let paramCount = 1;
+      const params = [req.user.id];
+      let paramCount = 1;
 
-        if (query) {
-          paramCount++;
-          sql += ` AND (original_name ILIKE $${paramCount} OR description ILIKE $${paramCount})`;
-          params.push(`%${query}%`);
-        }
-
-        if (fileType) {
-          paramCount++;
-          if (fileType === "image") {
-            sql += ` AND mime_type LIKE 'image/%'`;
-          } else if (fileType === "document") {
-            sql += ` AND mime_type LIKE 'application/%'`;
-          }
-        }
-
-        sql += ` ORDER BY created_at DESC LIMIT $${paramCount + 1} OFFSET $${
-          paramCount + 2
-        }`;
-        params.push(limit, offset);
-
-        const result = await databases.postgresPool.query(sql, params);
-
-        res.json({
-          files: result.rows,
-          pagination: {
-            limit,
-            offset,
-            total: result.rows.length,
-            hasMore: result.rows.length === limit
-          }
-        });
-      } catch (error) {
-        console.error("Search files error:", error);
-        res.status(500).json({ error: "Failed to search files" });
+      if (query) {
+        paramCount++;
+        sql += ` AND (original_name ILIKE $${paramCount} OR description ILIKE $${paramCount})`;
+        params.push(`%${query}%`);
       }
+
+      if (fileType) {
+        paramCount++;
+        if (fileType === "image") {
+          sql += ` AND mime_type LIKE 'image/%'`;
+        } else if (fileType === "document") {
+          sql += ` AND mime_type LIKE 'application/%'`;
+        }
+      }
+
+      sql += ` ORDER BY created_at DESC LIMIT $${paramCount + 1} OFFSET $${
+        paramCount + 2
+      }`;
+      params.push(limit, offset);
+
+      const result = await databases.postgresPool.query(sql, params);
+
+      res.json({
+        files: result.rows,
+        pagination: {
+          limit,
+          offset,
+          total: result.rows.length,
+          hasMore: result.rows.length === limit
+        }
+      });
+    } catch (error) {
+      console.error("Search files error:", error);
+      res.status(500).json({ error: "Failed to search files" });
     }
-  );
+  });
 
   return router;
 };

@@ -10,6 +10,7 @@ const createFileRouter = require("./routes/files");
 const createEmailRouter = require("./routes/email");
 const createTenantRouter = require("./routes/tenants");
 const createQueueRouter = require("./routes/queues");
+const createTestRouter = require("./routes/test");
 const MinIOService = require("./services/MinIOService");
 const QueueService = require("./services/QueueService");
 const EmailWorker = require("./workers/EmailWorker");
@@ -134,15 +135,83 @@ async function createApp() {
   app.use(logApiRequests);
   app.use(logSecurityEvents);
 
-  // Tenant resolution middleware
+  // Await all async initialization before registering routes
+  await initializeDatabases();
+
+  // Public endpoints (no tenant resolution required)
+  app.get("/health", async (req, res) => {
+    try {
+      const health = {
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || "development"
+      };
+
+      // Check database connections
+      if (dbManager) {
+        health.databases = {
+          postgres: dbManager.databases.postgres ? "connected" : "disconnected",
+          redis: dbManager.databases.redis ? "connected" : "disconnected",
+          mongo: dbManager.databases.mongo ? "connected" : "disconnected"
+        };
+      }
+
+      res.json(health);
+    } catch (error) {
+      res.status(500).json({
+        status: "unhealthy",
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
+  // Database info endpoint (public)
+  app.get("/db-info", async (req, res) => {
+    try {
+      const health = await dbManager.healthCheck();
+      const info = {
+        databases: {
+          postgres: {
+            status: health.postgres ? "connected" : "disconnected",
+            type: "PostgreSQL",
+            purpose: "Structured data, user accounts, transactions"
+          },
+          mongodb: {
+            status: health.mongodb ? "connected" : "disconnected",
+            type: "MongoDB",
+            purpose: "Blockchain events, NFT metadata, user activity"
+          },
+          redis: {
+            status: health.redis ? "connected" : "disconnected",
+            type: "Redis",
+            purpose: "Caching, sessions, real-time data"
+          }
+        },
+        architecture: {
+          description: "Multi-database architecture for optimal performance",
+          postgresql: "ACID-compliant structured data storage",
+          mongodb: "Flexible document storage for blockchain data",
+          redis: "High-performance caching and session management"
+        }
+      };
+
+      res.json(info);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Legacy endpoints for backward compatibility (public)
+  app.get("/ping", (req, res) => res.send("pong"));
+
+  // Tenant resolution middleware (applied after public endpoints)
   if (process.env.NODE_ENV === "test") {
     app.use(optionalTenant);
   } else {
     app.use(resolveTenant);
   }
-
-  // Await all async initialization before registering routes
-  await initializeDatabases();
 
   // Initialize queue service (only in production or when explicitly requested)
   if (process.env.NODE_ENV !== "test") {
@@ -176,11 +245,14 @@ async function createApp() {
   }
 
   // Routes with database access
-  app.use("/api/auth", createAuthRouter(dbManager));
-  app.use("/api/web3", createWeb3Router(dbManager));
-  app.use("/api/files", createFileRouter(dbManager));
+  app.use("/api/auth", createAuthRouter(dbManager.databases));
+  app.use("/api/web3", createWeb3Router(dbManager.databases));
+  app.use("/api/files", createFileRouter(dbManager.databases));
   app.use("/api/email", createEmailRouter());
-  app.use("/api/tenants", createTenantRouter(dbManager));
+  app.use("/api/tenants", createTenantRouter(dbManager.databases));
+
+  // Test routes (only available in development/test environment)
+  app.use("/api/test", createTestRouter(dbManager.databases));
 
   // Queue management routes (only if queue service is available)
   if (queueService && emailWorker && blockchainWorker && maintenanceWorker) {
@@ -196,36 +268,6 @@ async function createApp() {
   }
 
   console.log("✅ All routes and services initialized");
-
-  // Health check endpoint
-  app.get("/health", async (req, res) => {
-    try {
-      const health = {
-        status: "healthy",
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        environment: process.env.NODE_ENV || "development",
-        tenantId: req.tenantId || null
-      };
-
-      // Check database connections
-      if (dbManager) {
-        health.databases = {
-          postgres: dbManager.databases.postgres ? "connected" : "disconnected",
-          redis: dbManager.databases.redis ? "connected" : "disconnected",
-          mongo: dbManager.databases.mongo ? "connected" : "disconnected"
-        };
-      }
-
-      res.json(health);
-    } catch (error) {
-      res.status(500).json({
-        status: "unhealthy",
-        error: error.message,
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
 
   // Logging routes (admin only)
   app.get("/api/logs", authenticateToken, async (req, res) => {
@@ -333,8 +375,6 @@ async function createApp() {
   process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
   // Legacy endpoints for backward compatibility
-  app.get("/ping", (req, res) => res.send("pong"));
-
   app.get("/mongo-status", async (req, res) => {
     try {
       const health = await dbManager.healthCheck();
@@ -392,42 +432,6 @@ async function createApp() {
         error: "MinIO connection failed",
         detail: err.message
       });
-    }
-  });
-
-  // Database info endpoint
-  app.get("/db-info", async (req, res) => {
-    try {
-      const health = await dbManager.healthCheck();
-      const info = {
-        databases: {
-          postgres: {
-            status: health.postgres ? "connected" : "disconnected",
-            type: "PostgreSQL",
-            purpose: "Structured data, user accounts, transactions"
-          },
-          mongodb: {
-            status: health.mongodb ? "connected" : "disconnected",
-            type: "MongoDB",
-            purpose: "Blockchain events, NFT metadata, user activity"
-          },
-          redis: {
-            status: health.redis ? "connected" : "disconnected",
-            type: "Redis",
-            purpose: "Caching, sessions, real-time data"
-          }
-        },
-        architecture: {
-          description: "Multi-database architecture for optimal performance",
-          postgresql: "ACID-compliant structured data storage",
-          mongodb: "Flexible document storage for blockchain data",
-          redis: "High-performance caching and session management"
-        }
-      };
-
-      res.json(info);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
     }
   });
 

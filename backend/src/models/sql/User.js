@@ -349,8 +349,7 @@ class User {
       tenantId,
       sessionId,
       type: "access",
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60 // 24 hours
+      iat: Math.floor(Date.now() / 1000)
     };
 
     return jwt.sign(payload, process.env.JWT_SECRET || "your-secret-key", {

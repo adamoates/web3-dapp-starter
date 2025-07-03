@@ -2,9 +2,9 @@ const express = require("express");
 const { body, validationResult } = require("express-validator");
 const Web3Service = require("../services/Web3Service");
 
-function createWeb3Router(dbManager) {
+function createWeb3Router(databases) {
   const router = express.Router();
-  const web3Service = new Web3Service(dbManager);
+  const web3Service = new Web3Service(databases);
 
   // Middleware to authenticate JWT token
   const authenticateToken = async (req, res, next) => {

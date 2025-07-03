@@ -1,15 +1,12 @@
 const express = require("express");
 const { body, validationResult } = require("express-validator");
 const UserService = require("../services/UserService");
-const {
-  rateLimit: createRateLimit,
-  logAuthEvent
-} = require("../middleware/auth");
+const { createRateLimit, logAuthEvent } = require("../middleware/auth");
 const UserActivity = require("../models/nosql/UserActivity");
 
-function createAuthRouter(dbManager) {
+function createAuthRouter(databases) {
   const router = express.Router();
-  const userService = new UserService(dbManager);
+  const userService = new UserService(databases);
 
   // Middleware to extract client info
   const extractClientInfo = (req, res, next) => {
@@ -641,12 +638,18 @@ function createAuthRouter(dbManager) {
 
         const { walletAddress } = req.body;
         const { ipAddress, userAgent } = req.clientInfo;
-        const tenantId = req.tenantId;
+        const tenantId = req.tenantId || 1; // Default to tenant 1 for wallet auth
 
-        const challenge = await userService.generateWalletChallenge(
+        // Use enhanced wallet challenge from middleware
+        const { generateWalletChallenge } = require("../middleware/auth");
+        const challenge = generateWalletChallenge(walletAddress);
+
+        // Log the challenge request
+        const { logAuthEvent } = require("../middleware/auth");
+        await logAuthEvent(req, "wallet_challenge_request", {
           walletAddress,
           tenantId
-        );
+        });
 
         res.json({
           message: "Challenge generated successfully",
@@ -668,6 +671,7 @@ function createAuthRouter(dbManager) {
     [
       body("walletAddress").isLength({ min: 42, max: 42 }),
       body("signature").notEmpty(),
+      body("nonce").notEmpty(),
       extractClientInfo
     ],
     async (req, res) => {
@@ -680,34 +684,32 @@ function createAuthRouter(dbManager) {
           });
         }
 
-        const { walletAddress, signature } = req.body;
+        const { walletAddress, signature, nonce } = req.body;
         const { ipAddress, userAgent } = req.clientInfo;
-        const tenantId = req.tenantId;
+        const tenantId = req.tenantId || 1; // Default to tenant 1 for wallet auth
 
-        const result = await userService.verifyWalletSignature(
+        // Use enhanced wallet authentication from middleware
+        const { authenticateWallet } = require("../middleware/auth");
+        const result = await authenticateWallet(
           walletAddress,
           signature,
-          tenantId
+          nonce,
+          tenantId,
+          req
         );
 
         res.json({
           message: "Wallet authentication successful",
-          user: {
-            id: result.user.id,
-            email: result.user.email,
-            name: result.user.name,
-            walletAddress: result.user.wallet_address,
-            isVerified: result.user.is_verified,
-            tenantId: result.user.tenant_id
-          },
+          user: result.user,
           token: result.token,
-          sessionId: result.sessionId
+          expiresIn: result.expiresIn,
+          isNewUser: result.isNewUser
         });
       } catch (error) {
         console.error("Wallet verification error:", error);
 
         if (
-          error.message.includes("Challenge not found") ||
+          error.message.includes("Invalid or expired nonce") ||
           error.message.includes("expired")
         ) {
           return res.status(400).json({
@@ -716,7 +718,7 @@ function createAuthRouter(dbManager) {
           });
         }
 
-        if (error.message.includes("Invalid signature")) {
+        if (error.message.includes("Signature verification failed")) {
           return res.status(401).json({
             error: "Invalid signature",
             message: error.message
@@ -751,7 +753,7 @@ function createAuthRouter(dbManager) {
 
         const { walletAddress, signature } = req.body;
         const { ipAddress, userAgent } = req.clientInfo;
-        const tenantId = req.tenantId;
+        const tenantId = req.tenantId || 1; // Default to tenant 1 for wallet auth
 
         const result = await userService.verifyWalletSignature(
           walletAddress,
@@ -794,6 +796,79 @@ function createAuthRouter(dbManager) {
 
         res.status(500).json({
           error: "Wallet authentication failed",
+          message: error.message
+        });
+      }
+    }
+  );
+
+  // Complete wallet user profile
+  router.post(
+    "/complete-profile",
+    [
+      body("name").isLength({ min: 2 }).trim(),
+      body("email").optional().isEmail().normalizeEmail(),
+      extractClientInfo
+    ],
+    async (req, res) => {
+      try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+          return res.status(400).json({
+            error: "Validation failed",
+            details: errors.array()
+          });
+        }
+
+        const { name, email } = req.body;
+        const { ipAddress, userAgent } = req.clientInfo;
+        const tenantId = req.tenantId || 1; // Default to tenant 1 for wallet auth
+
+        // Get user ID from temporary session or request
+        const userId = req.body.userId || req.user?.userId;
+
+        if (!userId) {
+          return res.status(400).json({
+            error: "User ID required for profile completion"
+          });
+        }
+
+        const result = await userService.completeWalletUserProfile(
+          userId,
+          { name, email },
+          tenantId
+        );
+
+        res.json({
+          message: "Profile completed successfully",
+          user: {
+            id: result.user.id,
+            email: result.user.email,
+            name: result.user.name,
+            walletAddress: result.user.wallet_address,
+            isVerified: result.user.is_verified,
+            tenantId: result.user.tenant_id
+          },
+          token: result.token,
+          sessionId: result.sessionId
+        });
+      } catch (error) {
+        console.error("Profile completion error:", error);
+
+        if (error.message === "User not found") {
+          return res.status(404).json({
+            error: "User not found"
+          });
+        }
+
+        if (error.message.includes("Name is required")) {
+          return res.status(400).json({
+            error: "Name is required and must be at least 2 characters"
+          });
+        }
+
+        res.status(500).json({
+          error: "Profile completion failed",
           message: error.message
         });
       }

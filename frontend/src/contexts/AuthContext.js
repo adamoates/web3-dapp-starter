@@ -2,7 +2,7 @@ import React, { createContext, useContext, useReducer, useEffect } from "react";
 import { ethers } from "ethers";
 
 // API Base URL
-const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:3001";
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:5001";
 
 // Action Types
 const AUTH_ACTIONS = {
@@ -15,7 +15,9 @@ const AUTH_ACTIONS = {
   SET_WALLET: "SET_WALLET",
   SET_CHALLENGE: "SET_CHALLENGE",
   CLEAR_ERROR: "CLEAR_ERROR",
-  SET_REGISTRATION_SUCCESS: "SET_REGISTRATION_SUCCESS"
+  SET_REGISTRATION_SUCCESS: "SET_REGISTRATION_SUCCESS",
+  SET_NEW_WALLET_USER: "SET_NEW_WALLET_USER",
+  CLEAR_NEW_WALLET_USER: "CLEAR_NEW_WALLET_USER"
 };
 
 // Initial State
@@ -28,7 +30,8 @@ const initialState = {
   loading: false,
   error: null,
   isAuthenticated: false,
-  registrationSuccess: false
+  registrationSuccess: false,
+  newWalletUser: null
 };
 
 // Reducer
@@ -56,6 +59,10 @@ function authReducer(state, action) {
       return { ...state, error: null };
     case AUTH_ACTIONS.SET_REGISTRATION_SUCCESS:
       return { ...state, registrationSuccess: action.payload };
+    case AUTH_ACTIONS.SET_NEW_WALLET_USER:
+      return { ...state, newWalletUser: action.payload };
+    case AUTH_ACTIONS.CLEAR_NEW_WALLET_USER:
+      return { ...state, newWalletUser: null };
     case AUTH_ACTIONS.LOGOUT:
       return {
         ...initialState,
@@ -277,7 +284,7 @@ export function AuthProvider({ children }) {
       });
 
       // Get challenge from server
-      const challengeData = await apiRequest("/api/auth/wallet-challenge", {
+      const challengeData = await apiRequest("/api/auth/challenge", {
         method: "POST",
         body: JSON.stringify({ walletAddress })
       });
@@ -299,19 +306,57 @@ export function AuthProvider({ children }) {
       dispatch({ type: AUTH_ACTIONS.SET_LOADING, payload: true });
       dispatch({ type: AUTH_ACTIONS.CLEAR_ERROR });
 
-      const data = await apiRequest("/api/auth/wallet-verify", {
+      const data = await apiRequest("/api/auth/verify", {
         method: "POST",
         body: JSON.stringify({
           walletAddress: state.wallet.address,
-          challenge: state.challenge.challenge,
           signature
+        })
+      });
+
+      // Check if this is a new user requiring profile completion
+      if (data.isNewUser && data.requiresProfileCompletion) {
+        dispatch({
+          type: AUTH_ACTIONS.SET_NEW_WALLET_USER,
+          payload: data.user
+        });
+        return { requiresProfileCompletion: true, user: data.user };
+      }
+
+      // Existing user - proceed with normal login
+      localStorage.setItem("authToken", data.token);
+      dispatch({ type: AUTH_ACTIONS.SET_TOKEN, payload: data.token });
+      dispatch({ type: AUTH_ACTIONS.SET_USER, payload: data.user });
+      dispatch({ type: AUTH_ACTIONS.SET_CHALLENGE, payload: null });
+
+      return data;
+    } catch (error) {
+      dispatch({ type: AUTH_ACTIONS.SET_ERROR, payload: error.message });
+      throw error;
+    } finally {
+      dispatch({ type: AUTH_ACTIONS.SET_LOADING, payload: false });
+    }
+  };
+
+  // Complete Wallet User Profile
+  const completeWalletProfile = async (profileData) => {
+    try {
+      dispatch({ type: AUTH_ACTIONS.SET_LOADING, payload: true });
+      dispatch({ type: AUTH_ACTIONS.CLEAR_ERROR });
+
+      const data = await apiRequest("/api/auth/complete-profile", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: state.newWalletUser.id,
+          name: profileData.name,
+          email: profileData.email
         })
       });
 
       localStorage.setItem("authToken", data.token);
       dispatch({ type: AUTH_ACTIONS.SET_TOKEN, payload: data.token });
       dispatch({ type: AUTH_ACTIONS.SET_USER, payload: data.user });
-      dispatch({ type: AUTH_ACTIONS.SET_CHALLENGE, payload: null });
+      dispatch({ type: AUTH_ACTIONS.CLEAR_NEW_WALLET_USER });
 
       return data;
     } catch (error) {
@@ -439,6 +484,7 @@ export function AuthProvider({ children }) {
     logout,
     connectWallet,
     verifyWalletSignature,
+    completeWalletProfile,
     setTenantId,
     getProfile,
     getStats,

@@ -5,7 +5,7 @@ const path = require("path");
 const { Pool } = require("pg");
 
 // Database configuration
-const config = {
+const developmentConfig = {
   host: process.env.POSTGRES_HOST || "localhost",
   port: process.env.POSTGRES_PORT || 5432,
   database: process.env.POSTGRES_DB || "dapp",
@@ -57,17 +57,8 @@ async function runMigrations(pool, migrationsDir) {
         const filePath = path.join(migrationsDir, filename);
         const sql = fs.readFileSync(filePath, "utf8");
 
-        // Split SQL by semicolons and execute each statement
-        const statements = sql
-          .split(";")
-          .map((stmt) => stmt.trim())
-          .filter((stmt) => stmt.length > 0 && !stmt.startsWith("--"));
-
-        for (const statement of statements) {
-          if (statement.trim()) {
-            await pool.query(statement);
-          }
-        }
+        // Execute the entire SQL file as one statement
+        await pool.query(sql);
 
         // Record migration as executed
         await pool.query("INSERT INTO migrations (filename) VALUES ($1)", [

@@ -10,7 +10,7 @@ function initializeLogging(databases) {
 }
 
 /**
- * Log API requests with tenant context and performance metrics
+ * Enhanced API request logging with performance monitoring and security detection
  */
 function logApiRequests(req, res, next) {
   if (!loggingService) {
@@ -19,42 +19,78 @@ function logApiRequests(req, res, next) {
 
   const startTime = Date.now();
   const originalSend = res.send;
+  const originalJson = res.json;
 
-  // Capture request details
-  const requestData = {
-    method: req.method,
-    path: req.path,
-    ipAddress: req.ip || req.connection.remoteAddress,
-    userAgent: req.get("User-Agent"),
-    tenantId: req.tenantId,
-    userId: req.user?.userId,
-    sessionId: req.sessionId,
-    requestBody: req.body,
-    query: req.query,
-    headers: {
-      "content-type": req.get("Content-Type"),
-      authorization: req.get("Authorization") ? "Bearer [REDACTED]" : undefined
-    }
+  // Skip logging for health checks and static files
+  const skipPaths = ["/health", "/ping", "/favicon.ico"];
+  if (skipPaths.some((path) => req.path.startsWith(path))) {
+    return next();
+  }
+
+  // Enhanced security detection
+  const securityChecks = {
+    suspiciousUserAgent: /bot|crawler|spider|scraper/i.test(
+      req.get("User-Agent") || ""
+    ),
+    sqlInjectionAttempt: /union|select|insert|delete|drop|exec/i.test(
+      JSON.stringify(req.query) + JSON.stringify(req.body)
+    ),
+    pathTraversal: /\.\.\/|\.\.\\/.test(req.path),
+    unusualMethod: ![
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "PATCH",
+      "OPTIONS",
+      "HEAD"
+    ].includes(req.method)
   };
+
+  const securityFlags = Object.entries(securityChecks)
+    .filter(([key, detected]) => detected)
+    .map(([key]) => key);
+
+  // Log security threats immediately
+  if (securityFlags.length > 0) {
+    console.warn("🚨 Security threat detected:", {
+      flags: securityFlags,
+      path: req.path,
+      ip: req.ip
+    });
+
+    loggingService
+      .logSecurityEvent({
+        userId: req.user?.userId || "anonymous",
+        tenantId: req.tenantId || 1,
+        event: "security_threat",
+        details: { flags: securityFlags, path: req.path },
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        sessionId: req.sessionId,
+        severity: "HIGH"
+      })
+      .catch(console.error);
+  }
 
   // Override res.send to capture response details
   res.send = function (data) {
     const responseTime = Date.now() - startTime;
     const responseSize = data ? JSON.stringify(data).length : 0;
 
-    // Log the API request
+    // Log the API request with enhanced features
     loggingService
       .logApiRequest({
-        userId: requestData.userId,
-        tenantId: requestData.tenantId,
-        method: requestData.method,
-        path: requestData.path,
+        userId: req.user?.userId || "anonymous",
+        tenantId: req.tenantId || 1,
+        method: req.method,
+        path: req.path,
         statusCode: res.statusCode,
         responseTime,
-        ipAddress: requestData.ipAddress,
-        userAgent: requestData.userAgent,
-        sessionId: requestData.sessionId,
-        requestBody: requestData.requestBody,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        sessionId: req.sessionId,
+        requestBody: req.body,
         responseSize
       })
       .catch((error) => {
@@ -65,15 +101,89 @@ function logApiRequests(req, res, next) {
     originalSend.call(this, data);
   };
 
+  // Override res.json for JSON responses
+  res.json = function (data) {
+    const responseTime = Date.now() - startTime;
+    const responseSize = data ? JSON.stringify(data).length : 0;
+
+    // Log the API request with enhanced features
+    loggingService
+      .logApiRequest({
+        userId: req.user?.userId || "anonymous",
+        tenantId: req.tenantId || 1,
+        method: req.method,
+        path: req.path,
+        statusCode: res.statusCode,
+        responseTime,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        sessionId: req.sessionId,
+        requestBody: req.body,
+        responseSize
+      })
+      .catch((error) => {
+        console.error("Failed to log API request:", error);
+      });
+
+    // Call original json
+    originalJson.call(this, data);
+  };
+
   next();
 }
 
 /**
- * Log security events
+ * Enhanced security event logging with threat detection
  */
 function logSecurityEvents(req, res, next) {
   if (!loggingService) {
     return next();
+  }
+
+  // Enhanced security detection for all requests
+  const securityChecks = {
+    suspiciousUserAgent: /bot|crawler|spider|scraper/i.test(
+      req.get("User-Agent") || ""
+    ),
+    sqlInjectionAttempt: /union|select|insert|delete|drop|exec/i.test(
+      JSON.stringify(req.query) + JSON.stringify(req.body)
+    ),
+    pathTraversal: /\.\.\/|\.\.\\/.test(req.path),
+    unusualMethod: ![
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "PATCH",
+      "OPTIONS",
+      "HEAD"
+    ].includes(req.method)
+  };
+
+  const securityFlags = Object.entries(securityChecks)
+    .filter(([key, detected]) => detected)
+    .map(([key]) => key);
+
+  // Log security threats immediately
+  if (securityFlags.length > 0) {
+    console.warn("🚨 Security threat detected:", {
+      flags: securityFlags,
+      path: req.path,
+      ip: req.ip
+    });
+
+    loggingService
+      .logSecurityEvent({
+        userId: req.user?.userId || "anonymous",
+        tenantId: req.tenantId || 1,
+        event: "security_threat",
+        details: { flags: securityFlags, path: req.path },
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        sessionId: req.sessionId,
+        severity: "HIGH"
+      })
+      .catch(console.error);
   }
 
   // Log failed authentication attempts
@@ -82,14 +192,15 @@ function logSecurityEvents(req, res, next) {
     if (res.statusCode === 401 || res.statusCode === 403) {
       loggingService
         .logSecurityEvent({
-          userId: req.user?.userId,
-          tenantId: req.tenantId,
+          userId: req.user?.userId || "anonymous",
+          tenantId: req.tenantId || 1,
           event: "auth_failure",
           details: {
             method: req.method,
             path: req.path,
             statusCode: res.statusCode,
-            error: data.error
+            error: data.error,
+            securityFlags
           },
           ipAddress: req.ip,
           userAgent: req.get("User-Agent"),

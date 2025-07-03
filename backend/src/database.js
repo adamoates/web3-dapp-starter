@@ -65,7 +65,7 @@ let mongoConnection = null;
 let redisClient = null;
 let minioClient = null;
 
-function setupDatabase() {
+async function setupDatabase() {
   const config = getDatabaseConfig();
 
   // Initialize PostgreSQL
@@ -76,12 +76,13 @@ function setupDatabase() {
 
   // Initialize MongoDB
   if (!mongoConnection) {
-    mongoConnection = mongoose.connect(config.mongo.uri, {
+    await mongoose.connect(config.mongo.uri, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
       bufferCommands: false
     });
+    mongoConnection = mongoose.connection;
     console.log("✅ MongoDB connection initialized");
   }
 

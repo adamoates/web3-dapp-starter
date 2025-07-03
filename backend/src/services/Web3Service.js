@@ -198,12 +198,37 @@ class Web3Service {
         return { id: 1, ...txData };
       }
 
+      // Get tenant_id from user if available
+      let tenantId = null;
+      if (txData.userId && this.databases.postgres) {
+        try {
+          const userResult = await this.databases.postgres.query(
+            "SELECT tenant_id FROM users WHERE id = $1",
+            [txData.userId]
+          );
+          tenantId = userResult.rows[0]?.tenant_id;
+        } catch (error) {
+          console.warn("Could not get tenant_id for user:", error.message);
+        }
+      }
+
       // Store transaction in PostgreSQL
-      const transaction = await this.transaction.create(txData);
+      const transaction = await this.transaction.create({
+        userId: txData.userId,
+        txHash: txData.txHash,
+        type: txData.type,
+        amount: txData.amount,
+        status: txData.status,
+        blockNumber: txData.blockNumber,
+        gasUsed: txData.gasUsed,
+        gasPrice: txData.gasPrice,
+        tenantId: tenantId
+      });
 
       // Log activity in MongoDB
       const activity = new UserActivity({
-        userId: txData.userId,
+        userId: txData.userId || 0,
+        tenantId: tenantId || 1, // Default tenant if not provided
         action: "transaction_created",
         details: {
           txHash: txData.txHash,
@@ -262,7 +287,8 @@ class Web3Service {
 
       // Log status update activity
       const activity = new UserActivity({
-        userId: transaction.user_id,
+        userId: transaction.user_id || 0,
+        tenantId: transaction.tenant_id || 1, // Default tenant if not provided
         action: "transaction_status_updated",
         details: {
           txHash,
@@ -335,7 +361,8 @@ class Web3Service {
       // Log NFT activity
       if (nftData.owner) {
         const activity = new UserActivity({
-          userId: nftData.owner,
+          userId: nftData.owner || 0,
+          tenantId: nftData.tenantId || 1, // Default tenant if not provided
           action: "nft_metadata_stored",
           details: {
             contractAddress: nftData.contractAddress,

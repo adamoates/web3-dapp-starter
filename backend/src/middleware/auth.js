@@ -1,12 +1,30 @@
 const UserService = require("../services/UserService");
 const { rateLimit } = require("express-rate-limit");
+const { ethers } = require("ethers");
+const crypto = require("crypto");
 
-// Initialize UserService (will be injected with databases)
+// Initialize UserService and LoggingService (will be injected with databases)
 let userService = null;
+let loggingService = null;
+
+// Wallet authentication state
+const walletNonces = new Map(); // address -> { nonce, timestamp }
+const NONCE_EXPIRY = parseInt(process.env.WALLET_NONCE_EXPIRY) || 5 * 60 * 1000; // 5 minutes
 
 // Initialize the middleware with database connections
 function initializeAuth(databases) {
   userService = new UserService(databases);
+
+  // Initialize logging service for enhanced activity logging
+  try {
+    const LoggingService = require("../services/LoggingService");
+    loggingService = new LoggingService(databases);
+    console.log("✅ Auth middleware initialized with enhanced logging");
+  } catch (error) {
+    console.warn("Enhanced logging service not available");
+  }
+
+  console.log("✅ Auth middleware initialized with wallet support");
 }
 
 /**
@@ -202,29 +220,204 @@ function validateWalletOwnership() {
 }
 
 /**
- * Log authentication events
+ * Enhanced authentication event logging
  */
 async function logAuthEvent(req, eventType, details = {}) {
   try {
-    if (!userService) return;
-
-    const activity = new (require("../models/nosql/UserActivity"))({
-      userId: req.user?.userId,
-      tenantId: req.tenantId,
-      action: eventType,
-      details: {
-        ...details,
+    if (loggingService && loggingService.logActivity) {
+      // Use enhanced activity logging
+      await loggingService.logActivity({
+        userId: req.user?.userId?.toString() || "anonymous",
+        tenantId: req.tenantId || 1,
+        walletAddress: req.user?.walletAddress,
+        action: eventType,
+        details: {
+          ...details,
+          path: req.path,
+          method: req.method
+        },
         ipAddress: req.ip,
         userAgent: req.get("User-Agent"),
         sessionId: req.sessionId
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("User-Agent"),
-      sessionId: req.sessionId
-    });
-    await activity.save();
+      });
+    } else if (userService) {
+      // Fallback to original method
+      const activity = new (require("../models/nosql/UserActivity"))({
+        userId: req.user?.userId || 0,
+        tenantId: req.tenantId || 1,
+        action: eventType,
+        details: {
+          ...details,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          sessionId: req.sessionId
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        sessionId: req.sessionId
+      });
+      await activity.save();
+    }
   } catch (error) {
     console.error("Failed to log auth event:", error);
+  }
+}
+
+/**
+ * Generate wallet challenge for authentication
+ */
+function generateWalletChallenge(walletAddress) {
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const timestamp = Date.now();
+
+  walletNonces.set(walletAddress.toLowerCase(), { nonce, timestamp });
+  cleanupExpiredNonces();
+
+  const message = `Sign this message to authenticate with our service.
+
+Wallet: ${walletAddress}
+Nonce: ${nonce}
+Timestamp: ${new Date().toISOString()}
+Expires: ${new Date(timestamp + NONCE_EXPIRY).toISOString()}`;
+
+  return {
+    nonce,
+    message,
+    expiresAt: new Date(timestamp + NONCE_EXPIRY)
+  };
+}
+
+/**
+ * Verify wallet signature
+ */
+async function verifyWalletSignature(walletAddress, signature, providedNonce) {
+  const normalizedAddress = walletAddress.toLowerCase();
+  const storedNonce = walletNonces.get(normalizedAddress);
+
+  if (!storedNonce || storedNonce.nonce !== providedNonce) {
+    throw new Error("Invalid or expired nonce");
+  }
+
+  if (Date.now() - storedNonce.timestamp > NONCE_EXPIRY) {
+    walletNonces.delete(normalizedAddress);
+    throw new Error("Nonce expired");
+  }
+
+  // Recreate and verify the signed message
+  const message = `Sign this message to authenticate with our service.
+
+Wallet: ${walletAddress}
+Nonce: ${providedNonce}
+Timestamp: ${new Date(storedNonce.timestamp).toISOString()}
+Expires: ${new Date(storedNonce.timestamp + NONCE_EXPIRY).toISOString()}`;
+
+  const recoveredAddress = ethers.utils.verifyMessage(message, signature);
+
+  if (recoveredAddress.toLowerCase() !== normalizedAddress) {
+    throw new Error("Signature verification failed");
+  }
+
+  walletNonces.delete(normalizedAddress);
+  return true;
+}
+
+/**
+ * Authenticate wallet user
+ */
+async function authenticateWallet(
+  walletAddress,
+  signature,
+  nonce,
+  tenantId,
+  req = {}
+) {
+  const db = userService?.databases?.postgres;
+  if (!db) throw new Error("Database not available");
+
+  await verifyWalletSignature(walletAddress, signature, nonce);
+  const normalizedAddress = walletAddress.toLowerCase();
+
+  // Find or create user
+  let userResult = await db.query(
+    `SELECT * FROM users WHERE wallet_address = $1 AND tenant_id = $2`,
+    [normalizedAddress, tenantId]
+  );
+  let user = userResult.rows[0];
+  let isNewUser = false;
+
+  if (!user) {
+    const insertResult = await db.query(
+      `
+      INSERT INTO users (wallet_address, tenant_id, password_hash, name, is_verified, last_login_at, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
+    `,
+      [
+        normalizedAddress,
+        tenantId,
+        "", // Empty password hash for wallet users
+        `User ${normalizedAddress.slice(0, 8)}`,
+        true,
+        new Date(),
+        new Date(),
+        new Date()
+      ]
+    );
+
+    user = insertResult.rows[0];
+    isNewUser = true;
+  } else {
+    await db.query(
+      `UPDATE users SET last_login_at = $1, updated_at = $2 WHERE id = $3`,
+      [new Date(), new Date(), user.id]
+    );
+  }
+
+  // Generate JWT
+  const jwt = require("jsonwebtoken");
+  const token = jwt.sign(
+    {
+      userId: user.id,
+      email: user.email,
+      walletAddress: user.wallet_address,
+      tenantId: user.tenant_id,
+      authMethod: "wallet",
+      iat: Math.floor(Date.now() / 1000)
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "24h" }
+  );
+
+  await logAuthEvent(req, "wallet_auth_success", {
+    userId: user.id,
+    walletAddress: normalizedAddress,
+    isNewUser
+  });
+
+  return {
+    success: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      walletAddress: user.wallet_address,
+      tenantId: user.tenant_id,
+      authMethod: "wallet"
+    },
+    token,
+    expiresIn: "24h",
+    isNewUser
+  };
+}
+
+/**
+ * Clean up expired nonces
+ */
+function cleanupExpiredNonces() {
+  const now = Date.now();
+  for (const [address, data] of walletNonces.entries()) {
+    if (now - data.timestamp > NONCE_EXPIRY) {
+      walletNonces.delete(address);
+    }
   }
 }
 
@@ -239,5 +432,9 @@ module.exports = {
   requireAuth,
   optionalAuth,
   requireRole,
-  validateWalletOwnership
+  validateWalletOwnership,
+  generateWalletChallenge,
+  verifyWalletSignature,
+  authenticateWallet,
+  cleanupExpiredNonces
 };

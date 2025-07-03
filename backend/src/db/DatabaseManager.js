@@ -8,7 +8,7 @@ class DatabaseManager {
   async connect() {
     try {
       // Use the centralized database setup
-      this.databases = setupDatabase();
+      this.databases = await setupDatabase();
       console.log("✅ All databases connected via DatabaseManager");
       return this;
     } catch (error) {
@@ -50,8 +50,10 @@ class DatabaseManager {
 
     try {
       // Check MongoDB
-      await this.databases.mongo.db.admin().ping();
-      health.mongodb = true;
+      if (this.databases.mongo && this.databases.mongo.readyState === 1) {
+        await this.databases.mongo.db.admin().ping();
+        health.mongodb = true;
+      }
     } catch (error) {
       console.error("MongoDB health check failed:", error.message);
     }

@@ -13,9 +13,9 @@ const { body, validationResult } = require("express-validator");
 const TenantService = require("../services/TenantService");
 const UserActivity = require("../models/nosql/UserActivity");
 
-function createTenantRouter(dbManager) {
+function createTenantRouter(databases) {
   const router = express.Router();
-  const tenantService = new TenantService(dbManager);
+  const tenantService = new TenantService(databases);
 
   // Get all tenants (admin only)
   router.get("/", authenticateToken, requireAdmin, async (req, res) => {

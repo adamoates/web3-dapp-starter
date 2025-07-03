@@ -11,15 +11,37 @@ class Transaction {
     status = "pending",
     blockNumber = null,
     gasUsed = null,
-    gasPrice = null
+    gasPrice = null,
+    tenantId = null
   }) {
+    // If no tenantId provided, get default tenant
+    if (!tenantId) {
+      const defaultTenantResult = await this.pool.query(
+        "SELECT id FROM tenants WHERE slug = 'default' AND status = 'active'"
+      );
+      tenantId = defaultTenantResult.rows[0]?.id;
+      if (!tenantId) {
+        throw new Error("Default tenant not found");
+      }
+    }
+
     const result = await this.pool.query(
       `
-      INSERT INTO transactions (user_id, tx_hash, type, amount, status, block_number, gas_used, gas_price) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+      INSERT INTO transactions (user_id, tx_hash, type, amount, status, block_number, gas_used, gas_price, tenant_id) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
       RETURNING *
     `,
-      [userId, txHash, type, amount, status, blockNumber, gasUsed, gasPrice]
+      [
+        userId,
+        txHash,
+        type,
+        amount,
+        status,
+        blockNumber,
+        gasUsed,
+        gasPrice,
+        tenantId
+      ]
     );
 
     return result.rows[0];

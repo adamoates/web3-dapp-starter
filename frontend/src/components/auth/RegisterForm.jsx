@@ -184,11 +184,9 @@ const RegisterForm = ({ onSwitchToLogin, onRegistrationSuccess }) => {
 
     try {
       await register({
-        firstName: formData.firstName.trim(),
-        lastName: formData.lastName.trim(),
+        name: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
         email: formData.email.trim().toLowerCase(),
-        password: formData.password,
-        acceptMarketing: formData.acceptMarketing
+        password: formData.password
       });
 
       // Call the success callback with the email

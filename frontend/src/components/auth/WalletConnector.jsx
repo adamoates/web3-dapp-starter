@@ -10,7 +10,7 @@ import {
   FiRefreshCw
 } from "react-icons/fi";
 
-const WalletConnector = () => {
+const WalletConnector = ({ onClose }) => {
   const {
     connectWallet,
     verifyWalletSignature,
@@ -66,8 +66,12 @@ const WalletConnector = () => {
     try {
       setStep("verifying");
       const signature = await wallet.signer.signMessage(challenge.challenge);
-      await verifyWalletSignature(signature);
+      const result = await verifyWalletSignature(signature);
+
       setStep("success");
+      setTimeout(() => {
+        if (onClose) onClose();
+      }, 1200); // Show success for 1.2s
     } catch (error) {
       console.error("Wallet signature failed:", error);
       setStep("sign");
@@ -240,6 +244,16 @@ const WalletConnector = () => {
       <p className="text-sm text-gray-600">
         You have been successfully authenticated with your wallet.
       </p>
+      <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
+        <FiLoader className="h-4 w-4 animate-spin" />
+        <span>Redirecting to dashboard...</span>
+      </div>
+      <button
+        onClick={onClose}
+        className="mt-4 px-4 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+      >
+        Close
+      </button>
     </div>
   );
 
